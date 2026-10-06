@@ -60,3 +60,21 @@ Gunicorn digunakan pada Linux/Unix. Set `DATABASE_PATH` ke disk persisten milik 
 5. Atur backup SQLite konsisten, pemantauan, batas request 8 MB, rate limit dan akses operasional. Baca batas keamanan di README sebelum menggunakan data nasabah nyata.
 
 Repository, domain, layanan SMTP dan hosting perlu disiapkan pada akun Anda. Dokumen ini tidak menyatakan deployment atau pengiriman email nyata sudah dilakukan.
+
+## Render (pilihan proyek ini)
+
+Repository memiliki `render.yaml` untuk satu Web Service Python di Singapore, disk persisten 1 GB pada `/var/data`, Gunicorn dan health check `/api/config`. Paket layanan ini berbayar; biaya server dan disk harus ditinjau pada dashboard sebelum membuat layanan. Auto-deploy dimatikan agar setiap release dipicu manual setelah pengujian.
+
+1. Login ke Render dan pilih **New → Blueprint**.
+2. Hubungkan repository `Kznrifky/bpip`, branch `main`, dan gunakan `render.yaml`.
+3. Tinjau region, paket server dan disk beserta biaya yang ditampilkan.
+4. Isi seluruh variabel yang diminta dengan `sync: false` langsung di Render. Jangan menaruh rahasia di GitHub atau chat.
+5. Masukkan konfigurasi SMTP milik Anda dan alamat pengirim yang sudah diverifikasi. Default port 587/STARTTLS; jika penyedia menggunakan 465/SSL, ubah `SMTP_PORT` dan `SMTP_TLS` pada service sebelum deploy.
+6. Isi nama, email dan password petugas/SOL pada `BOOTSTRAP_*`. Password minimal 12 karakter; email kedua akun harus berbeda. Akun akan dibuat secara atomik hanya saat database masih kosong. Akun demo tidak dipakai.
+7. Setelah deployment pertama berhasil dan login kedua akun sudah diperiksa, hapus keenam variabel `BOOTSTRAP_PETUGAS_*`/`BOOTSTRAP_SOL_*`, lalu set `BOOTSTRAP_USERS=0`. Jangan menghapus disk. Variabel bootstrap tidak mengubah akun yang sudah tersimpan.
+8. URL email otomatis menggunakan `RENDER_EXTERNAL_URL` yang disediakan Render. Jika menggunakan domain sendiri, atur `PUBLIC_BASE_URL=https://domain-anda` dan akses aplikasi melalui origin yang sama.
+9. Uji email pada alamat uji milik Anda, keputusan nasabah, review SOL dan revisi. Jangan mulai memakai data nasabah nyata sebelum review keamanan dan backup disiapkan.
+
+Database dibuat saat runtime karena persistent disk Render tidak tersedia pada build/pre-deploy/one-off job. Dengan demikian tidak perlu menjalankan `server.py init` sebagai build command. Native Python dipilih untuk menghindari kebutuhan pengaturan ownership mount Docker; Dockerfile tetap tersedia untuk host lain. Health check dapat lolos hanya setelah worker berhasil memvalidasi konfigurasi dan akun awal.
+
+Referensi: [Blueprint specification](https://render.com/docs/blueprint-spec), [Persistent disks](https://render.com/docs/disks), [Default environment variables](https://render.com/docs/environment-variables).

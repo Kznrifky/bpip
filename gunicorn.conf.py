@@ -17,6 +17,11 @@ def post_worker_init(worker):
     import server
     server.initialize()
     server.validate_config()
+    # Render disks are unavailable to build/pre-deploy commands. Bootstrap at
+    # runtime, with secrets supplied in the dashboard, when explicitly enabled.
+    if os.getenv('BOOTSTRAP_USERS') == '1':
+        server.bootstrap_users()
+    server.validate_config()
     with server.database() as db:
         server.require(db.execute('SELECT COUNT(*) FROM users').fetchone()[0] > 0,
                        'Buat akun dahulu menggunakan python server.py init.')

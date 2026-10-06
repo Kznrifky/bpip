@@ -34,7 +34,7 @@ for line in (ROOT / '.env').read_text().splitlines() if (ROOT / '.env').exists()
 
 PRODUCTION = os.getenv('APP_ENV', 'development') == 'production'
 DB_PATH = Path(os.getenv('DATABASE_PATH', str(ROOT / 'data/bpip.sqlite3')))
-BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8000').rstrip('/')
+BASE_URL = (os.getenv('PUBLIC_BASE_URL') or os.getenv('RENDER_EXTERNAL_URL') or 'http://localhost:8000').rstrip('/')
 MAIL_MODE = os.getenv('MAIL_MODE', 'console')
 BANK_NAME = os.getenv('BANK_NAME', 'BPIP Document Confirmation')
 MAX_FILE = 5 * 1024 * 1024
@@ -105,6 +105,28 @@ def create_user(email, name, role, password):
     email = valid_email(email)
     with database(True) as db:
         db.execute('INSERT INTO users VALUES(?,?,?,?,?)', (secrets.token_hex(12), email, name, role, password_hash(password)))
+
+def bootstrap_users():
+    """Create both initial users atomically, only on an empty persistent DB.
+
+    Environment values are never printed, returned by the API or used to reset
+    existing passwords. Remove BOOTSTRAP_* secrets after the first deploy.
+    """
+    with database(True) as db:
+        if db.execute('SELECT COUNT(*) FROM users').fetchone()[0]:
+            return False
+        values = []
+        for role in ('petugas', 'sol'):
+            prefix = 'BOOTSTRAP_' + role.upper()
+            email = valid_email(os.getenv(prefix + '_EMAIL', ''))
+            name = text_field({'name': os.getenv(prefix + '_NAME', '')}, 'name')
+            password = os.getenv(prefix + '_PASSWORD', '')
+            require(12 <= len(password) <= 500, f'{prefix}_PASSWORD harus 12–500 karakter.')
+            require(not PRODUCTION or password not in ('PetugasDemo!2026', 'SolDemo!2026'), 'Password demo tidak boleh dipakai saat production.')
+            values.append((secrets.token_hex(12), email, name, role, password_hash(password)))
+        require(values[0][1] != values[1][1], 'Email petugas dan SOL harus berbeda.')
+        db.executemany('INSERT INTO users VALUES(?,?,?,?,?)', values)
+    return True
 
 class AppError(Exception):
     def __init__(self, status, message):

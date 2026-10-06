@@ -1,0 +1,58 @@
+# Review the paid service/disk costs in Render before creating this Blueprint.
+services:
+  - type: web
+    name: bpip
+    runtime: python
+    region: singapore
+    plan: 0.5c-512mb
+    branch: main
+    numInstances: 1
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --config gunicorn.conf.py wsgi:application
+    healthCheckPath: /api/config
+    disk:
+      name: bpip-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: GUNICORN_CMD_ARGS
+        value: ""
+      - key: DATABASE_PATH
+        value: /var/data/bpip.sqlite3
+      - key: MAIL_MODE
+        value: smtp
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_TLS
+        value: starttls
+      - key: TOKEN_TTL_HOURS
+        value: "24"
+      - key: BANK_NAME
+        value: BPIP Document Confirmation
+      - key: BOOTSTRAP_USERS
+        value: "1"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: BOOTSTRAP_PETUGAS_EMAIL
+        sync: false
+      - key: BOOTSTRAP_PETUGAS_NAME
+        sync: false
+      - key: BOOTSTRAP_PETUGAS_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_SOL_EMAIL
+        sync: false
+      - key: BOOTSTRAP_SOL_NAME
+        sync: false
+      - key: BOOTSTRAP_SOL_PASSWORD
+        sync: false
