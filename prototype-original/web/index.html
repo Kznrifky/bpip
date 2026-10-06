@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Automated Document Confirmation Agent — Sistem konfirmasi dokumen Standing Instruction dan Warkat secara digital, aman, dan real-time." />
+  <title>ADCA — Automated Document Confirmation Agent</title>
+  <link rel="stylesheet" href="css/main.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>" />
+</head>
+<body>
+
+<!-- Ambient Background -->
+<div class="ambient-bg" aria-hidden="true"></div>
+
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<!-- ════════════════════════════════════════
+     APP WRAPPER
+════════════════════════════════════════ -->
+<div class="app-wrapper">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar" id="sidebar" aria-label="Navigasi Utama">
+    <div class="sidebar-logo">
+      <div class="logo-icon" aria-hidden="true">🏦</div>
+      <h1>ADCA System</h1>
+      <p>Automated Document Confirmation</p>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Menu Utama</div>
+
+      <button class="nav-item active" data-page="dashboard" id="nav-dashboard" aria-current="page">
+        <span class="nav-icon">📊</span>
+        Dashboard
+        <span class="nav-badge" id="nav-badge-pending">3</span>
+      </button>
+
+      <button class="nav-item" data-page="initiate" id="nav-initiate">
+        <span class="nav-icon">➕</span>
+        Inisiasi Dokumen
+      </button>
+
+      <button class="nav-item" data-page="portal" id="nav-portal">
+        <span class="nav-icon">🔗</span>
+        Portal Nasabah
+      </button>
+
+      <div class="nav-section-label" style="margin-top:16px">Sistem</div>
+
+      <button class="nav-item" onclick="showToast('Fitur pengaturan akan segera hadir.', 'info', '⚙️')">
+        <span class="nav-icon">⚙️</span>
+        Pengaturan
+      </button>
+      <button class="nav-item" onclick="showToast('Panduan pengguna tersedia di portal.', 'info', '📖')">
+        <span class="nav-icon">📖</span>
+        Panduan
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-card" id="sidebar-user-card">
+        <div class="user-avatar" id="sidebar-user-avatar" aria-hidden="true">RW</div>
+        <div class="user-info">
+          <div class="user-name" id="sidebar-user-name">Rina Wulandari</div>
+          <div class="user-role" id="sidebar-user-role">Petugas CS · Cabang Utama (Maker)</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN CONTENT ── -->
+  <main class="main-content" id="main-content">
+
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-title">
+        <h2 id="topbar-title">Dashboard</h2>
+        <p id="topbar-sub">Monitoring & Audit Trail Real-Time</p>
+      </div>
+      <div class="topbar-actions">
+        <!-- Role Switcher -->
+        <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.04);border:1px solid var(--border);padding:6px 12px;border-radius:var(--radius-md)">
+          <span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em">Role:</span>
+          <select id="user-role-select" onchange="switchRole(this.value)" style="background:transparent;border:none;color:var(--text-primary);font-size:12.5px;font-weight:700;cursor:pointer;outline:none" aria-label="Pilih Role Pengguna">
+            <option value="petugas" style="background:#0d1422;color:#f1f5f9">👤 Petugas (Maker)</option>
+            <option value="sol" style="background:#0d1422;color:#f1f5f9">🛡️ SOL / Approver (Checker)</option>
+          </select>
+        </div>
+
+        <span style="font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace" id="clock"></span>
+        
+        <!-- Create Document Button (Maker only) -->
+        <button class="btn btn-primary" id="btn-new-doc">
+          <span>➕</span> Buat Dokumen Baru
+        </button>
+        <!-- SOL Badge Indicator (when SOL is active) -->
+        <div id="sol-mode-badge" style="display:none;align-items:center;gap:6px;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);color:var(--accent-purple);padding:8px 14px;border-radius:var(--radius-md);font-size:12px;font-weight:700">
+          <span>🛡️</span> Mode SOL: Otorisasi & Approval
+        </div>
+      </div>
+    </header>
+
+    <!-- ════════════════════════════════
+         PAGE 1: DASHBOARD
+    ════════════════════════════════ -->
+    <section class="page active" id="page-dashboard" aria-label="Dashboard">
+
+      <!-- Stats -->
+      <div class="stats-grid">
+        <div class="stat-card" style="--stat-color:var(--accent-blue);--stat-bg:var(--accent-blue-dim)">
+          <div class="stat-icon">📁</div>
+          <div class="stat-label">Total Dokumen</div>
+          <div class="stat-value" id="stat-total">—</div>
+          <div class="stat-change up">↑ 12% minggu ini</div>
+        </div>
+        <div class="stat-card" style="--stat-color:var(--accent-amber);--stat-bg:rgba(245,158,11,0.12)">
+          <div class="stat-icon">⏳</div>
+          <div class="stat-label">Menunggu Konfirmasi</div>
+          <div class="stat-value" id="stat-pending">—</div>
+          <div class="stat-change">SLA: max 24 jam</div>
+        </div>
+        <div class="stat-card" style="--stat-color:var(--accent-green);--stat-bg:rgba(34,197,94,0.1)">
+          <div class="stat-icon">✅</div>
+          <div class="stat-label">Terkonfirmasi</div>
+          <div class="stat-value" id="stat-confirmed">—</div>
+          <div class="stat-change up">↑ 8% bulan ini</div>
+        </div>
+        <div class="stat-card" style="--stat-color:var(--accent-red);--stat-bg:rgba(239,68,68,0.1)">
+          <div class="stat-icon">❌</div>
+          <div class="stat-label">Ditolak</div>
+          <div class="stat-value" id="stat-rejected">—</div>
+          <div class="stat-change down">↓ Risk flag aktif</div>
+        </div>
+      </div>
+
+      <!-- Filter + Table -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3>Daftar Dokumen</h3>
+            <p>Riwayat semua permintaan konfirmasi</p>
+          </div>
+          <div class="filter-bar">
+            <input type="text" id="filter-search" placeholder="🔍  Cari ID, nasabah, CIF..." style="width:220px" aria-label="Cari dokumen" />
+            <select id="filter-status" aria-label="Filter status">
+              <option value="">Semua Status</option>
+              <option value="pending">Pending</option>
+              <option value="sending">Mengirim</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <select id="filter-type" aria-label="Filter jenis">
+              <option value="">Semua Jenis</option>
+              <option value="Standing Instruction">Standing Instruction</option>
+              <option value="Warkat">Warkat</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table aria-label="Tabel Dokumen Konfirmasi">
+            <thead>
+              <tr>
+                <th>Document ID</th>
+                <th>Nasabah</th>
+                <th>Jenis</th>
+                <th>Nominal</th>
+                <th>Status Nasabah</th>
+                <th>Status SOL</th>
+                <th>Channel &amp; Pengiriman</th>
+                <th>Authorized Person</th>
+                <th>Dibuat</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="doc-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ════════════════════════════════
+         PAGE 2: INISIASI DOKUMEN
+    ════════════════════════════════ -->
+    <section class="page" id="page-initiate" aria-label="Form Inisiasi Dokumen">
+
+      <!-- Steps -->
+      <div class="steps">
+        <div class="step active" id="step-1">
+          <div class="step-circle" id="step-circle-1">1</div>
+          <div class="step-label" id="step-label-1">Data Nasabah</div>
+        </div>
+        <div class="step" id="step-2">
+          <div class="step-circle" id="step-circle-2">2</div>
+          <div class="step-label" id="step-label-2">Detail Transaksi</div>
+        </div>
+        <div class="step" id="step-3">
+          <div class="step-circle" id="step-circle-3">3</div>
+          <div class="step-label" id="step-label-3">Review & Kirim</div>
+        </div>
+      </div>
+
+      <!-- STEP 1: Data Nasabah -->
+      <div id="form-section-1" style="display:flex;flex-direction:column;gap:20px">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>🔎 Pencarian Data Nasabah</h3>
+              <p>Masukkan CIF atau Nomor Rekening untuk menarik data otomatis</p>
+            </div>
+          </div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:20px">
+            <div class="form-group">
+              <label for="cif-input">CIF / Nomor Rekening <span class="required">*</span></label>
+              <div class="search-bar">
+                <input
+                  type="text"
+                  id="cif-input"
+                  placeholder="Contoh: 1234567 atau 001-234-567-890"
+                  autocomplete="off"
+                  aria-required="true"
+                />
+                <button class="btn btn-primary" id="btn-search-cif" aria-label="Cari nasabah">
+                  🔍 Cari
+                </button>
+              </div>
+              <small style="color:var(--text-muted);font-size:11px">Demo CIF: <strong style="color:var(--accent-blue)">1234567</strong> · <strong style="color:var(--accent-blue)">9876543</strong> · <strong style="color:var(--accent-blue)">5551234</strong></small>
+            </div>
+
+            <!-- Customer Info Panel (auto-filled) -->
+            <div class="info-panel hidden" id="customer-info-panel" role="region" aria-label="Data Nasabah Ditemukan">
+              <div class="info-item" style="grid-column: 1/-1">
+                <div class="info-label">🏢 Nama Perusahaan</div>
+                <div class="info-value" id="info-name">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">🏦 Nomor Rekening</div>
+                <div class="info-value" id="info-account">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">👤 Contact Person</div>
+                <div class="info-value" id="info-contact">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">📱 No. HP / Email</div>
+                <div class="info-value" id="info-phone">—</div>
+                <div class="info-sub" id="info-email">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="btn btn-primary btn-lg" id="btn-next-1">Lanjut →</button>
+        </div>
+      </div>
+
+      <!-- STEP 2: Detail Transaksi -->
+      <div id="form-section-2" style="display:none;flex-direction:column;gap:20px">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>📋 Detail Transaksi & Dokumen</h3>
+              <p>Lengkapi informasi transaksi dan unggah dokumen</p>
+            </div>
+          </div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:24px">
+
+            <div class="section-title">Informasi Dokumen</div>
+            <div class="form-grid form-grid-2">
+              <div class="form-group">
+                <label for="doc-type">Jenis Dokumen <span class="required">*</span></label>
+                <select id="doc-type" aria-required="true">
+                  <option value="">-- Pilih Jenis Dokumen --</option>
+                  <option value="Standing Instruction">Standing Instruction (SI)</option>
+                  <option value="Warkat">Warkat</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="authorized-person">Authorized Person <span class="required">*</span></label>
+                <select id="authorized-person" aria-required="true">
+                  <option value="">-- Pilih Authorized Person --</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+            <div class="section-title">💰 Nominal Transaksi <span class="badge" style="background:rgba(59,130,246,0.15);color:var(--accent-blue);border:1px solid rgba(59,130,246,0.3);font-size:10px;font-weight:700">WAJIB DIISI</span></div>
+
+            <div class="form-grid form-grid-2">
+              <div class="form-group">
+                <label for="nominal-input">
+                  Nominal (Rupiah) <span class="required">*</span>
+                  <span class="badge-new">BARU</span>
+                </label>
+                <div class="input-wrap">
+                  <span class="input-prefix">Rp</span>
+                  <input
+                    type="text"
+                    id="nominal-input"
+                    class="has-prefix"
+                    placeholder="Contoh: 250.000.000"
+                    autocomplete="off"
+                    inputmode="numeric"
+                    aria-required="true"
+                    aria-describedby="nominal-hint"
+                  />
+                </div>
+                <small id="nominal-hint" style="font-size:11px;color:var(--text-muted)">Masukkan angka nominal sesuai dokumen SI/Warkat</small>
+              </div>
+              <div class="form-group">
+                <label>Preview Nominal</label>
+                <div class="nominal-display" id="nominal-display" aria-live="polite">—</div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+            <div class="section-title">Pengiriman Notifikasi</div>
+            <div class="form-grid form-grid-2">
+              <div class="form-group">
+                <label for="channel">Channel Notifikasi</label>
+                <select id="channel">
+                  <option value="WhatsApp">📱 WhatsApp</option>
+                  <option value="Email">📧 Email</option>
+                  <option value="WhatsApp & Email">📱📧 WhatsApp & Email</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="notes">Catatan Tambahan</label>
+                <textarea id="notes" placeholder="Catatan untuk petugas atau nasabah (opsional)..." rows="2"></textarea>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Live Template Preview -->
+            <div id="template-preview-section" style="display:none">
+              <div class="section-title" style="margin-bottom:14px">👁️ Preview Pesan yang Akan Dikirim</div>
+              <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.02)">
+                  <span id="preview-channel-label" style="font-size:12px;font-weight:700">📱 WhatsApp</span>
+                  <span style="font-size:11px;color:var(--text-muted)">Template Otomatis · Personalized</span>
+                </div>
+                <div id="preview-subject-row" style="display:none;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:rgba(245,158,11,0.04)">
+                  <span style="font-size:11px;font-weight:700;color:var(--accent-amber);white-space:nowrap;padding-top:2px">SUBJEK:</span>
+                  <span id="preview-subject-val" style="font-size:12px;color:var(--text-secondary)"></span>
+                </div>
+                <pre id="template-preview-box" style="padding:16px;font-size:12px;line-height:1.7;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow-y:auto;color:var(--text-primary)"></pre>
+              </div>
+              <div style="display:flex;justify-content:flex-end;margin-top:6px">
+                <span style="font-size:11px;color:var(--text-muted)">⚠️ Nominal, ID Dokumen, dan nama nasabah akan otomatis diisi saat pengiriman</span>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+            <div class="section-title">Upload Dokumen</div>
+
+            <div class="upload-zone" role="button" aria-label="Upload dokumen">
+              <input type="file" id="doc-file" accept=".pdf,.jpg,.jpeg,.png" aria-label="Pilih file dokumen" />
+              <div class="upload-icon">📎</div>
+              <p><strong>Drag & Drop</strong> atau <strong>klik untuk memilih</strong></p>
+              <p class="upload-hint">Format: PDF, JPG, PNG · Maks. 10 MB</p>
+            </div>
+            <div class="file-preview hidden" id="file-preview">
+              <span class="file-icon" id="file-icon-el">📄</span>
+              <div>
+                <div class="file-name" id="file-name">—</div>
+                <div class="file-size" id="file-size">—</div>
+              </div>
+              <span style="margin-left:auto;color:var(--accent-green)">✓ Siap</span>
+            </div>
+
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <button class="btn btn-secondary btn-lg" id="btn-back-2">← Kembali</button>
+          <button class="btn btn-primary btn-lg" id="btn-next-2">Review →</button>
+        </div>
+      </div>
+
+      <!-- STEP 3: Review & Kirim -->
+      <div id="form-section-3" style="display:none;flex-direction:column;gap:20px">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>✅ Review & Konfirmasi Pengiriman</h3>
+              <p>Periksa kembali seluruh data sebelum mengirim notifikasi ke nasabah</p>
+            </div>
+          </div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:20px">
+
+            <!-- Document ID -->
+            <div style="display:flex;align-items:center;gap:12px;padding:16px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius-md)">
+              <div style="font-size:28px">🔑</div>
+              <div>
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em">Document ID (Auto-Generated)</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:800;color:var(--accent-blue);margin-top:4px" id="rev-doc-id">—</div>
+              </div>
+            </div>
+
+            <div class="form-grid form-grid-2">
+              <div class="card-body" style="padding:0">
+                <div class="section-title" style="margin-bottom:14px">Data Nasabah</div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px;color:var(--text-muted)">Nama Perusahaan</span>
+                    <span style="font-weight:600;font-size:13px" id="rev-customer">—</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px;color:var(--text-muted)">No. Rekening</span>
+                    <span style="font-weight:600;font-size:13px" id="rev-account">—</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
+                    <span style="font-size:12px;color:var(--text-muted)">Authorized Person</span>
+                    <span style="font-weight:600;font-size:13px" id="rev-ap">—</span>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body" style="padding:0">
+                <div class="section-title" style="margin-bottom:14px">Detail Transaksi</div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px;color:var(--text-muted)">Jenis Dokumen</span>
+                    <span style="font-weight:600;font-size:13px" id="rev-type">—</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px;color:var(--text-muted)">Channel Notifikasi</span>
+                    <span style="font-weight:600;font-size:13px" id="rev-channel">—</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
+                    <span style="font-size:12px;color:var(--text-muted)">Dibuat Pada</span>
+                    <span style="font-weight:600;font-size:12px" id="rev-date">—</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Nominal Highlight -->
+            <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-md);padding:20px;text-align:center">
+              <div style="font-size:11.5px;font-weight:700;color:var(--accent-amber);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px">💰 Nominal Transaksi</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:800;color:var(--accent-amber)" id="rev-nominal">—</div>
+              <div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Nominal ini akan tertera pada notifikasi & portal konfirmasi nasabah</div>
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:flex-start;padding:14px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:var(--radius-sm)">
+              <span style="font-size:18px">ℹ️</span>
+              <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.6">Setelah menekan <strong style="color:var(--text-primary)">Kirim Konfirmasi</strong>, sistem akan otomatis membuat Secure Link dan mengirimkan notifikasi kepada nasabah via channel yang dipilih. Respon nasabah akan terekam dalam Audit Trail secara real-time.</p>
+            </div>
+
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;gap:12px">
+          <button class="btn btn-secondary btn-lg" id="btn-back-3">← Kembali</button>
+          <button class="btn btn-primary btn-lg" id="btn-submit" style="gap:10px">
+            🚀 Kirim Konfirmasi ke Nasabah
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ════════════════════════════════
+         PAGE 3: PORTAL NASABAH
+    ════════════════════════════════ -->
+    <section class="page" id="page-portal" aria-label="Portal Konfirmasi Nasabah">
+
+      <!-- Standalone Back Bar (Only visible when opened via external link) -->
+      <div id="portal-standalone-backbar" style="align-items:center;justify-content:space-between;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);padding:10px 20px;border-radius:var(--radius-md);margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🌐</span>
+          <span style="font-size:12.5px;color:var(--text-secondary)">Anda sedang mengakses <strong>Portal Verifikasi Nasabah</strong> melalui Single-Use Secure Link.</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="exitStandalonePortal()">
+          🏢 Kembali ke Dashboard Bank
+        </button>
+      </div>
+
+      <!-- Selector for demo -->
+      <div class="card" id="portal-demo-selector-card" style="padding:0">
+        <div class="card-header" style="padding:14px 20px">
+          <div>
+            <h3>🔗 Simulasi Portal Nasabah</h3>
+            <p>Pilih dokumen untuk melihat tampilan dari sisi nasabah</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <label for="portal-doc-selector" style="font-size:12.5px;color:var(--text-secondary);white-space:nowrap">Pilih Dokumen:</label>
+            <select id="portal-doc-selector" style="width:340px;font-size:13px" aria-label="Pilih dokumen untuk dipreview">
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Portal View -->
+      <div class="portal-wrapper">
+
+        <!-- Single-Use Token Security Bar -->
+        <div id="portal-token-bar" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:16px">🔑</span>
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:700;letter-spacing:0.06em">One Single-Time Verification Link</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:700;color:var(--accent-blue)" id="portal-token-text">vtok_...</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="portal-token-badge" style="font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:99px;background:rgba(34,197,94,0.12);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)">
+              🟢 Tautan Aktif (1x Pakai)
+            </span>
+            <button class="btn btn-secondary btn-sm" onclick="copyPortalLink()" title="Salin link verifikasi nasabah">
+              📋 Salin Link
+            </button>
+          </div>
+        </div>
+
+        <!-- Bank Header -->
+        <div class="portal-header-card">
+          <div class="portal-bank-logo">🏦 &nbsp; Bank Pembangunan Indonesia</div>
+          <div class="portal-doc-icon" aria-hidden="true" id="portal-doc-icon-text">📋</div>
+          <h2 id="portal-type-header">Standing Instruction</h2>
+          <p>Permintaan Konfirmasi Transaksi Finansial</p>
+          <div style="margin-top:16px">
+            <span class="doc-id" id="portal-doc-id-header">—</span>
+          </div>
+        </div>
+
+        <!-- Single-Use Link Consumed Alert (Shown if token has already been used) -->
+        <div id="portal-token-consumed-card" style="display:none;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-lg);padding:24px;margin-bottom:20px;text-align:center;animation:fadeIn 0.3s ease">
+          <div style="font-size:42px;margin-bottom:10px">🔒</div>
+          <h3 style="font-size:17px;font-weight:800;color:var(--accent-red);margin-bottom:6px">Tautan Verifikasi Ini Sudah Hangus (Single-Use Expired)</h3>
+          <p style="font-size:13px;color:var(--text-secondary);max-width:540px;margin:0 auto 14px;line-height:1.6">
+            Demi keamanan dana Anda, tautan verifikasi perbankan hanya dapat digunakan <strong>1 (satu) kali</strong>. Dokumen ini telah ditanggapi sebelumnya dan tidak dapat diubah lagi.
+          </p>
+          <div style="display:inline-flex;gap:12px;background:rgba(0,0,0,0.25);padding:10px 18px;border-radius:var(--radius-md);border:1px solid var(--border);font-size:12px;text-align:left">
+            <div>
+              <span style="color:var(--text-muted)">Keputusan:</span> <strong id="ptc-action" style="color:var(--text-primary)">—</strong>
+            </div>
+            <div style="border-left:1px solid var(--border);padding-left:12px">
+              <span style="color:var(--text-muted)">Waktu:</span> <strong id="ptc-time" style="color:var(--text-primary)">—</strong>
+            </div>
+            <div style="border-left:1px solid var(--border);padding-left:12px">
+              <span style="color:var(--text-muted)">Oleh:</span> <strong id="ptc-actor" style="color:var(--text-primary)">—</strong>
+            </div>
+          </div>
+          <div style="margin-top:16px">
+            <span style="font-size:11.5px;color:var(--text-muted)">Jika Anda memerlukan perubahan transaksi, silakan hubungi Customer Care: 📞 1500-XXX</span>
+          </div>
+        </div>
+
+        <!-- Greeting -->
+        <div id="portal-greeting-box" style="padding:16px 20px;background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.2);border-radius:var(--radius-md);margin-bottom:16px;font-size:13.5px;color:var(--text-secondary);line-height:1.7">
+          Kepada Yth. <strong style="color:var(--text-primary)" id="portal-ap">—</strong>,<br />
+          Bank kami memerlukan konfirmasi Anda atas dokumen berikut. Harap periksa detail transaksi dengan seksama sebelum memberikan persetujuan.
+        </div>
+
+        <!-- Nominal Highlight -->
+        <div class="nominal-highlight" aria-label="Nominal Transaksi">
+          <div class="nh-label">💰 Nominal Transaksi</div>
+          <div class="nh-amount" id="portal-nominal-big" aria-live="polite">—</div>
+          <div class="nh-sub">Pastikan nominal ini sesuai dengan dokumen yang diajukan ke bank</div>
+        </div>
+
+        <!-- Detail Card -->
+        <div class="portal-detail-card" role="region" aria-label="Detail Dokumen">
+          <div class="portal-detail-row">
+            <span class="pdr-label">Document ID</span>
+            <span class="pdr-value"><span class="doc-id" id="portal-doc-id">—</span></span>
+          </div>
+          <div class="portal-detail-row">
+            <span class="pdr-label">Nama Nasabah</span>
+            <span class="pdr-value" id="portal-customer">—</span>
+          </div>
+          <div class="portal-detail-row">
+            <span class="pdr-label">Jenis Dokumen</span>
+            <span class="pdr-value" id="portal-type">—</span>
+          </div>
+          <div class="portal-detail-row">
+            <span class="pdr-label">Tanggal Permintaan</span>
+            <span class="pdr-value" id="portal-date">—</span>
+          </div>
+          <div class="portal-detail-row">
+            <span class="pdr-label">Authorized Person</span>
+            <span class="pdr-value" id="portal-ap-detail">—</span>
+          </div>
+          <div class="portal-detail-row">
+            <span class="pdr-label">Channel Notifikasi</span>
+            <span class="pdr-value" id="portal-channel">—</span>
+          </div>
+        </div>
+
+        <!-- Action Buttons (Only shown if token is NOT used) -->
+        <div id="portal-action-area">
+          <div style="font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:12px">
+            ⚠️ Tautan ini bersifat <strong>sekali-pakai</strong>. Begitu Anda memilih, tautan akan otomatis hangus dan keputusan tidak dapat dibatalkan.
+          </div>
+          <div class="portal-action-btns">
+            <button class="btn btn-danger btn-lg" id="btn-reject-portal" style="background:linear-gradient(135deg,#ef4444,#dc2626);border-color:transparent">
+              ❌ Tolak (Reject)
+            </button>
+            <button class="btn btn-primary btn-lg" id="btn-confirm-portal" style="background:linear-gradient(135deg,var(--accent-teal),var(--accent-green));border-color:transparent">
+              ✅ Setujui (Confirm)
+            </button>
+          </div>
+        </div>
+
+        <!-- Result -->
+        <div id="portal-result" style="display:none" aria-live="polite"></div>
+
+        <div class="portal-footer">
+          <p>🔒 Halaman ini dilindungi enkripsi SSL 256-bit &amp; Single-Use Token Security. Berlaku 24 jam.</p>
+          <p style="margin-top:4px">© 2026 Bank Pembangunan Indonesia — ADCA System v1.0</p>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ════════════════════════════════════════
+     MODALS
+════════════════════════════════════════ -->
+
+<!-- Audit Trail Modal -->
+<div class="modal-overlay" id="modal-audit" role="dialog" aria-modal="true" aria-labelledby="audit-modal-title">
+  <div class="modal" style="max-width:520px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h3 style="font-size:16px;font-weight:800" id="audit-modal-title">🔍 Audit Trail</h3>
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="closeModal('modal-audit')" aria-label="Tutup modal">✕</button>
+    </div>
+
+    <!-- Doc summary -->
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px;margin-bottom:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:0.07em">Document ID</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:var(--accent-blue);margin-top:3px" id="audit-doc-id">—</div>
+      </div>
+      <div>
+        <div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:0.07em">Nasabah</div>
+        <div style="font-size:13px;font-weight:600;margin-top:3px" id="audit-customer">—</div>
+      </div>
+      <div>
+        <div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:0.07em">Jenis</div>
+        <div style="font-size:13px;font-weight:600;margin-top:3px" id="audit-type">—</div>
+      </div>
+      <div>
+        <div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:0.07em">Nominal</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--accent-amber);margin-top:3px" id="audit-nominal">—</div>
+      </div>
+      <div style="grid-column:1/-1">
+        <div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:0.07em">Authorized Person</div>
+        <div style="font-size:13px;font-weight:600;margin-top:3px" id="audit-ap">—</div>
+      </div>
+    </div>
+
+    <!-- Delivery Status Bar -->
+    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px">Status Kirim</div>
+        <div id="audit-delivery" style="font-size:13px;font-weight:700">—</div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px">📤 Dikirim Pada</div>
+        <div id="audit-sent-at" style="font-size:12px;font-weight:600">—</div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px">👁️ Dibaca Pada</div>
+        <div id="audit-read-at" style="font-size:12px;font-weight:600">—</div>
+      </div>
+    </div>
+
+    <div class="timeline" id="audit-timeline"></div>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="modal-confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+  <div class="modal">
+    <div class="modal-icon">✅</div>
+    <h3 id="confirm-modal-title">Konfirmasi Persetujuan</h3>
+    <p>Anda akan menyetujui transaksi ini. Tindakan ini akan direkam dalam <strong>Audit Trail</strong> dengan timestamp saat ini dan tidak dapat dibatalkan.</p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('modal-confirm')">Batal</button>
+      <button class="btn btn-primary" id="btn-do-confirm">✅ Ya, Konfirmasi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal-overlay" id="modal-reject" role="dialog" aria-modal="true" aria-labelledby="reject-modal-title">
+  <div class="modal">
+    <div class="modal-icon">❌</div>
+    <h3 id="reject-modal-title">Konfirmasi Penolakan</h3>
+    <p>Anda akan <strong>menolak</strong> transaksi ini. Petugas bank akan menerima notifikasi dan menghubungi Anda untuk tindak lanjut. Tindakan ini akan direkam.</p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('modal-reject')">Batal</button>
+      <button class="btn btn-danger" id="btn-do-reject">❌ Ya, Tolak</button>
+    </div>
+  </div>
+</div>
+
+<!-- Notif Preview Modal -->
+<div class="modal-overlay" id="modal-notif" role="dialog" aria-modal="true" aria-labelledby="notif-modal-title">
+  <div class="modal" style="max-width:560px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <h3 style="font-size:15px;font-weight:800" id="notif-modal-title">✉️ Isi Pesan Notifikasi</h3>
+        <span id="notif-channel-badge" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px">WhatsApp</span>
+      </div>
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="closeModal('modal-notif')" aria-label="Tutup">✕</button>
+    </div>
+    <div id="notif-subject-row" style="display:none;align-items:flex-start;gap:10px;padding:10px 14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-sm);margin-bottom:12px">
+      <span style="font-size:11px;font-weight:700;color:var(--accent-amber);white-space:nowrap;padding-top:2px">SUBJEK:</span>
+      <span id="notif-subject" style="font-size:12.5px;font-weight:600"></span>
+    </div>
+    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden">
+      <pre id="notif-body" style="padding:18px;font-size:12.5px;line-height:1.8;white-space:pre-wrap;word-break:break-word;max-height:380px;overflow-y:auto;color:var(--text-primary);font-family:'Inter',sans-serif"></pre>
+    </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius-sm)">
+      <span style="font-size:14px">💡</span>
+      <span style="font-size:11.5px;color:var(--text-secondary)">Untuk mengirim email nyata ke Gmail nasabah, klik tombol <strong>"Buka Gmail &amp; Kirim"</strong> di bawah. Tab Gmail compose akan terbuka otomatis dengan alamat dan isi pesan yang sudah lengkap!</span>
+    </div>
+    <div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <button class="btn btn-secondary btn-sm" id="btn-copy-notif" onclick="copyNotifBody()">
+        📋 Salin Teks
+      </button>
+      <div style="display:flex;gap:8px">
+        <a id="btn-open-wa-direct" href="#" target="_blank" class="btn btn-secondary btn-sm" style="display:none;background:rgba(34,197,94,0.15);color:var(--accent-green);border-color:rgba(34,197,94,0.3)">
+          📱 Buka WhatsApp Web
+        </a>
+        <a id="btn-open-gmail-direct" href="#" target="_blank" class="btn btn-primary btn-sm" style="display:none;background:linear-gradient(135deg,#ea4335,#db4437);border-color:transparent">
+          ✉️ Buka Gmail &amp; Kirim
+        </a>
+        <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-notif')">Tutup</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Approval Khusus SOL (Checker) -->
+<div class="modal-overlay" id="modal-sol-approval" role="dialog" aria-modal="true" aria-labelledby="sol-modal-title">
+  <div class="modal" style="max-width:520px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:36px;height:36px;border-radius:50%;background:rgba(139,92,246,0.15);display:flex;align-items:center;justify-content:center;font-size:18px">🛡️</div>
+        <div>
+          <h3 style="font-size:16px;font-weight:800" id="sol-modal-title">Review &amp; Approval SOL</h3>
+          <p style="font-size:11.5px;color:var(--text-muted)">Section Operations Lead · Dual Control / Checker</p>
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="closeModal('modal-sol-approval')" aria-label="Tutup modal">✕</button>
+    </div>
+
+    <!-- Document Info Card -->
+    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Document ID</div>
+        <div id="sol-doc-id" style="font-size:13px;font-weight:700;color:var(--accent-blue);font-family:'JetBrains Mono',monospace">—</div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Jenis Dokumen</div>
+        <div id="sol-doc-type" style="font-size:12.5px;font-weight:600">—</div>
+      </div>
+      <div style="grid-column:1/-1">
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Nasabah</div>
+        <div id="sol-doc-customer" style="font-size:13.5px;font-weight:700">—</div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Nominal Transaksi</div>
+        <div id="sol-doc-nominal" style="font-size:15px;font-weight:800;color:var(--accent-amber);font-family:'JetBrains Mono',monospace">—</div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Petugas Pembuat (Maker)</div>
+        <div id="sol-doc-officer" style="font-size:12.5px;font-weight:600">—</div>
+      </div>
+      <div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Status Konfirmasi Nasabah</div>
+        <div id="sol-doc-customer-status" style="font-size:12px;margin-top:2px">—</div>
+      </div>
+    </div>
+
+    <!-- Guard Notice if Customer hasn't confirmed yet -->
+    <div id="sol-customer-guard-alert" style="display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);padding:12px 14px;border-radius:var(--radius-sm);margin-bottom:14px;font-size:12.5px;color:var(--accent-red)">
+      🔒 <strong>Otorisasi Terkunci:</strong> Dokumen ini belum disetujui oleh nasabah melalui link verifikasi. Sesuai SOP Bank, SOL baru dapat melakukan verifikasi &amp; approval setelah nasabah memberikan persetujuan (Confirmed).
+    </div>
+
+    <!-- Notes Input -->
+    <div class="form-group" style="margin-bottom:16px">
+      <label for="sol-notes" style="font-size:12px;font-weight:600">Catatan Review SOL (Opsional)</label>
+      <input type="text" id="sol-notes" placeholder="Contoh: Dokumen fisik dan nominal sesuai formulir." style="font-size:13px" />
+    </div>
+
+    <!-- Action Buttons -->
+    <div style="display:flex;justify-content:flex-end;gap:10px">
+      <button class="btn btn-secondary" onclick="closeModal('modal-sol-approval')">Batal</button>
+      <button class="btn btn-danger" id="btn-sol-reject-action" onclick="submitSolApproval('rejected')">
+        ❌ Tolak (SOL Reject)
+      </button>
+      <button class="btn btn-primary" id="btn-sol-approve-action" style="background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))" onclick="submitSolApproval('approved')">
+        ✅ Setujui (SOL Approve)
+      </button>
+    </div>
+  </div>
+</div>
+
+<style>
+.notif-body-wa {
+  font-family: 'Inter', sans-serif;
+  background: linear-gradient(135deg, rgba(18,140,126,0.06), rgba(7,94,84,0.04));
+}
+.notif-body-email {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(59,130,246,0.04);
+  font-size: 12px !important;
+  line-height: 1.75 !important;
+}
+</style>
+
+<script src="js/app.js"></script>
+<script>
+  // Live clock
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toLocaleTimeString('id-ID', { hour12: false });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // Sync portal-ap to detail
+  const origLoad = window.loadPortalDoc;
+  // Patch to also fill portal-ap-detail
+  const _origLoadPortalDoc = loadPortalDoc;
+  window.loadPortalDoc = function(docId, docData) {
+    _origLoadPortalDoc(docId, docData);
+    const doc = docData || DB.documents.find(d => d.id === docId);
+    if (doc) {
+      document.getElementById('portal-ap').textContent        = doc.authorizedPerson;
+      document.getElementById('portal-ap-detail').textContent = doc.authorizedPerson;
+    }
+  };
+
+  // re-init after patch
+  setTimeout(() => {
+    populatePortalSelector();
+    initPortal();
+  }, 100);
+</script>
+</body>
+</html>

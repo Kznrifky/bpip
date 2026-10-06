@@ -1,0 +1,190 @@
+"""Integration checks against an actual HTTP server and temporary SQLite DB."""
+import base64
+import concurrent.futures
+import http.cookiejar
+import importlib.util
+import json
+import os
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, build_opener, HTTPCookieProcessor
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('bpip', Path(__file__).resolve().parents[1] / 'server.py')
+app = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(app)
+FILE = {'name': 'surat.pdf', 'base64': base64.b64encode(b'%PDF-1.4\nSample integration fixture\n%%EOF').decode()}
+
+class Client:
+    def __init__(self, url):
+        self.url=url
+        self.opener=build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.csrf=''
+    def call(self, path, data=None, csrf=True, origin=None):
+        headers = {}
+        if data is not None:
+            headers['Content-Type']='application/json'
+            headers['X-CSRF-Token']=self.csrf if csrf else 'invalid'
+        if origin:
+            headers['Origin']=origin
+        request=Request(self.url+'/api'+path, data=json.dumps(data).encode() if data is not None else None, headers=headers)
+        try:
+            res=self.opener.open(request)
+        except HTTPError as e:
+            res=e
+        body=res.read()
+        value=json.loads(body) if 'application/json' in res.headers.get('Content-Type','') else body
+        return res.status,value,res.headers
+    def login(self, role):
+        status,data,headers=self.call('/login',{'email':role+'@bpip.local','password':'PetugasDemo!2026' if role=='petugas' else 'SolDemo!2026'})
+        assert status==200,data
+        self.csrf=data['csrf']
+        return headers
+
+class WorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        app.DB_PATH=Path(self.temp.name)/'bpip.sqlite3'
+        app.MAIL_MODE='console'
+        app.PRODUCTION=False
+        app.initialize()
+        app.seed_demo()
+        self.server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
+        self.url='http://127.0.0.1:'+str(self.server.server_port)
+        app.BASE_URL=self.url
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
+        self.thread.start()
+        self.maker=Client(self.url);self.maker.login('petugas')
+        self.sol=Client(self.url);self.sol.login('sol')
+        self.customer=Client(self.url)
+    def tearDown(self):
+        self.server.shutdown();self.server.server_close();self.thread.join()
+        self.temp.cleanup()
+    def create(self, client=None):
+        status,result,_=(client or self.maker).call('/documents',{'cif':'1234567','kind':'Standing Instruction','nominal':250000000,'description':'Pembayaran vendor','file':FILE})
+        self.assertEqual(status,201,result)
+        return result['id']
+    def token(self, doc_id):
+        with app.database() as db:
+            row=db.execute('SELECT body FROM outbox WHERE doc_id=? ORDER BY version DESC LIMIT 1',(doc_id,)).fetchone()
+        return row['body'].split('/#confirm/')[1].split()[0]
+    def respond(self, token, decision='confirmed'):
+        return self.customer.call('/portal/decision',{'token':token,'decision':decision,'notes':'Tidak sesuai' if decision=='rejected' else '', 'acknowledged':True})
+    def test_full_revision_and_approval_flow(self):
+        doc_id=self.create();token1=self.token(doc_id)
+        # Opening portal has no consent side effects.
+        for _ in range(2):
+            status,result,_=self.customer.call('/portal',{'token':token1})
+            self.assertEqual(status,200)
+            self.assertEqual(result['document']['nominal'],250000000)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
+        self.assertEqual(self.respond(token1)[0],200)
+        self.assertEqual(self.respond(token1)[0],410)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki tanggal surat'})[0],200)
+        revision={'version':1,'kind':'Standing Instruction','nominal':260000000,'description':'Nominal diperbaiki','notes':'Tanggal diperbaiki','file':FILE}
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',revision)[0],200)
+        token2=self.token(doc_id)
+        self.assertNotEqual(token1,token2)
+        self.assertEqual(self.customer.call('/portal',{'token':token1})[0],410)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
+        self.assertEqual(self.respond(token2)[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':2,'decision':'approved','notes':'Surat sesuai'})[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':2,'decision':'rejected','notes':'Ubah keputusan'})[0],409)
+        status,result,_=self.maker.call('/documents/'+doc_id)
+        d=result['document']
+        self.assertEqual(d['sol_status'],'approved')
+        self.assertEqual(len(d['versions']),2)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/versions/1/file')[0],200)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/versions/3/file')[0],404)
+        self.assertTrue(any(a['action']=='SOL meminta revisi surat' for a in d['audit']))
+        self.assertTrue(any(a['ip'] for a in d['audit']))
+        self.assertEqual(self.customer.call('/documents')[0],401)
+    def test_rejected_customer_cannot_be_approved(self):
+        doc_id=self.create()
+        self.assertEqual(self.respond(self.token(doc_id),'rejected')[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':''})[0],400)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':'Nasabah menolak surat'})[0],200)
+    def test_roles_csrf_and_ownership(self):
+        doc_id=self.create()
+        self.assertEqual(self.sol.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':1,'file':FILE})[0],403)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved'})[0],403)
+        self.assertEqual(self.maker.call('/customers',{'cif':'888','name':'PT Baru','account':'1234','person':'Ani','email':'ani@example.com'},csrf=False)[0],403)
+        self.assertEqual(self.maker.call('/logout',{},origin='https://evil.example')[0],403)
+        app.create_user('other@example.com','Other maker','petugas','OtherSecret!2026')
+        other=Client(self.url)
+        status,res,_=other.call('/login',{'email':'other@example.com','password':'OtherSecret!2026'})
+        other.csrf=res['csrf']
+        self.assertEqual(other.call('/documents/'+doc_id)[0],403)
+        self.assertEqual(other.call('/documents/'+doc_id+'/file')[0],403)
+        self.assertEqual(other.call('/documents')[1]['documents'],[])
+    def test_expired_links_validation_and_resend(self):
+        doc_id=self.create();token=self.token(doc_id)
+        self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'confirmed','acknowledged':False})[0],400)
+        self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'rejected','acknowledged':True,'notes':''})[0],400)
+        with app.database(True) as db:
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc_id))
+            db.execute('UPDATE outbox SET created=? WHERE doc_id=?',('2020-01-01T00:00:00+00:00',doc_id))
+        self.assertEqual(self.respond(token)[0],410)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/resend',{'version':1})[0],200)
+        new_token=self.token(doc_id)
+        self.assertNotEqual(token,new_token)
+        self.assertEqual(self.respond(new_token)[0],200)
+        for invalid in (-1,0,1.5,True,'1000',1000000000000000):
+            status,_,_=self.maker.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':invalid,'file':FILE})
+            self.assertEqual(status,400)
+        bad_file={'name':'payload.html','base64':base64.b64encode(b'<script>alert(1)</script>').decode()}
+        self.assertEqual(self.maker.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':100,'file':bad_file})[0],400)
+    def test_concurrent_decisions_single_use(self):
+        doc_id=self.create();token=self.token(doc_id)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futures=[pool.submit(self.respond,token,decision) for decision in ('confirmed','rejected')]
+            statuses=sorted(f.result()[0] for f in futures)
+        self.assertEqual(statuses,[200,410])
+        with app.database() as db:
+            count=db.execute("SELECT COUNT(*) FROM audit WHERE doc_id=? AND action LIKE 'Nasabah %'",(doc_id,)).fetchone()[0]
+        self.assertEqual(count,1)
+    def test_outbox_local_smtp_retry_and_persistence(self):
+        doc_id=self.create()
+        self.assertTrue(app.deliver_one())
+        status,res,_=self.maker.call('/outbox')
+        self.assertEqual(status,200)
+        self.assertEqual(res['messages'][0]['status'],'local')
+        self.assertEqual(len(list((app.DB_PATH.parent/'outbox').glob('*.eml'))),1)
+        app.initialize() # Startup preserves data.
+        self.assertEqual(self.maker.call('/documents')[1]['documents'][0]['id'],doc_id)
+        app.MAIL_MODE='smtp'
+        with app.database(True) as db:
+            db.execute("UPDATE outbox SET status='queued',next_attempt=0")
+        smtp=unittest.mock.MagicMock()
+        with patch.dict(os.environ,{'SMTP_HOST':'smtp.example.com','SMTP_FROM':'sender@example.com','SMTP_USER':'sender','SMTP_PASSWORD':'secret'}),patch.object(app.smtplib,'SMTP',return_value=smtp):
+            self.assertTrue(app.deliver_one())
+            smtp.__enter__.return_value.starttls.assert_called_once()
+            smtp.__enter__.return_value.send_message.assert_called_once()
+        self.assertEqual(self.maker.call('/documents/'+doc_id)[1]['document']['mail']['status'],'sent')
+        with app.database(True) as db:
+            db.execute("UPDATE outbox SET status='queued',next_attempt=0,attempts=4")
+        with patch.dict(os.environ,{'SMTP_HOST':'smtp.example.com'}),patch.object(app.smtplib,'SMTP',side_effect=OSError('test disconnect')),patch.object(app.logging,'exception'):
+            app.deliver_one()
+        self.assertEqual(self.maker.call('/documents/'+doc_id)[1]['document']['mail']['status'],'failed')
+        self.assertEqual(self.maker.call('/outbox')[0],404) # Token previews absent in SMTP mode.
+    def test_login_limits_headers_password_and_logout(self):
+        headers=self.maker.login('petugas')
+        self.assertIn('HttpOnly',headers['Set-Cookie'])
+        self.assertIn('SameSite=Strict',headers['Set-Cookie'])
+        self.assertEqual(headers['Referrer-Policy'],'no-referrer')
+        self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])
+        self.assertEqual(self.maker.call('/password',{'current':'PetugasDemo!2026','password':'UpdatedSecret!2026'})[0],200)
+        self.assertEqual(self.maker.call('/logout',{})[0],200)
+        self.assertEqual(self.maker.call('/documents')[0],401)
+        client=Client(self.url)
+        for _ in range(10):
+            self.assertEqual(client.call('/login',{'email':'wrong@example.com','password':'wrong'})[0],401)
+        self.assertEqual(client.call('/login',{'email':'wrong@example.com','password':'wrong'})[0],429)
+
+if __name__=='__main__':
+    unittest.main(verbosity=2)

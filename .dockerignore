@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+data
+*.sqlite3
+*.sqlite3-*
+*.eml
+__pycache__
+**/__pycache__
+.venv
+prototype-original
+docs
+tests
+.DS_Store

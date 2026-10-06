@@ -1,0 +1,12 @@
+data/
+.env
+.env.*
+!.env.example
+.venv/
+.DS_Store
+*.sqlite3
+*.sqlite3-*
+*.eml
+__pycache__/
+*.pyc
+test-results/

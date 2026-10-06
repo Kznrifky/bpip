@@ -1,0 +1,64 @@
+Baik, ini adalah pembaruan pada bagian **Product Requirements Document (PRD)** dengan menambahkan kolom "Nominal" pada Input Form.
+
+Tambahan ini sangat logis dan penting, terutama karena *Standing Instruction* (SI) atau Warkat sangat erat kaitannya dengan perpindahan dana. Adanya nominal akan memberikan validasi ganda bagi nasabah saat mereka melakukan konfirmasi.
+
+Berikut adalah PRD yang telah diperbarui (fokus pada poin yang berubah):
+
+---
+
+# Product Requirements Document (PRD)
+
+**Nama Produk / Fitur:** Automated Document Confirmation Agent
+**Platform/Proyek:** Antigravity
+**Status Dokumen:** Draf (Revisi 1)
+
+## 1. Latar Belakang & Tujuan
+
+Saat ini, proses konfirmasi dokumen penting (seperti *Standing Instruction* atau penarikan Warkat) seringkali mengandalkan ingatan petugas, memakan waktu, dan rentan terhadap risiko tidak terekamnya persetujuan dengan baik.
+**Tujuan Produk:**
+Membangun *Agent* atau sistem terotomasi yang dapat memvalidasi identitas nasabah, mencatat detail transaksi (termasuk nominal), mengirimkan notifikasi permintaan konfirmasi secara *omnichannel* (WhatsApp/Email), dan merekam respon nasabah secara *real-time* ke dalam *audit trail* yang solid untuk memitigasi risiko operasional.
+
+## 2. Target Pengguna (User Personas)
+
+* **Petugas Cabang / CS / Back Office (Maker):** Pengguna yang menginisiasi permintaan konfirmasi, memasukkan detail nominal, dan mengunggah dokumen.
+* **Nasabah / Authorized Person:** Pihak berwenang dari sisi nasabah (misal: Direktur PT) yang menerima notifikasi, memvalidasi nominal/dokumen, dan memberikan persetujuan/penolakan.
+* **Supervisor / Tim Risk & Compliance (Checker/Monitor):** Pihak yang memantau *dashboard* untuk melihat *audit trail* dan status SLA konfirmasi.
+
+## 3. Kebutuhan Fungsional (Functional Requirements)
+
+**Epic 1: Inisiasi Dokumen (Sisi Petugas)**
+
+* **FR 1.1 - Pencarian Data:** Sistem harus menyediakan kolom input CIF atau Nomor Rekening.
+* **FR 1.2 - Integrasi Data Master:** Setelah CIF dimasukkan, *Agent* harus secara otomatis menarik data dari *Database* Terintegrasi (Nama PT, No Rekening, Contact Person, No. HP/Email, dan daftar *Authorized Person*).
+* **FR 1.3 - Input Detail Transaksi & Upload:**
+* Petugas harus bisa memilih jenis dokumen dari *dropdown* (mis. *Standing Instruction*, Warkat).
+* **[BARU] Petugas wajib memasukkan Nominal Transaksi (angka) yang tertera pada dokumen SI/Warkat.** Sistem harus menyediakan format mata uang otomatis (mis. format Rupiah).
+* Petugas mengunggah (*upload/scan*) dokumen asli (PDF/JPG).
+
+
+
+**Epic 2: Pemrosesan oleh Agent & Notifikasi**
+
+* **FR 2.1 - Document ID Generator:** Sistem harus membuat Unique Document ID secara otomatis (contoh format: `SI-YYYY-XXXXXX`).
+* **FR 2.2 - Dispatcher Agent:** Sistem harus dapat men-*trigger* pengiriman pesan secara otomatis ke WhatsApp atau Email nasabah.
+* **FR 2.3 - Isi Pesan Terpersonalisasi:** Pesan yang dikirim harus memuat Ringkasan (ID, **Nominal Transaksi**, Jenis Dokumen) dan *Secure Link* unik yang mengarah ke portal konfirmasi. *Catatan: Nominal harus disamarkan sebagian atau divalidasi penuh di portal aman (sesuai kebijakan security Bank).*
+
+**Epic 3: Konfirmasi Nasabah**
+
+* **FR 3.1 - Portal View:** Saat *Secure Link* diakses, nasabah dapat melihat ringkasan data konfirmasi: ID, Jenis Dokumen, Tanggal, **dan Nominal Transaksi (Rp XXX.XXX)**, serta pratinjau dokumen jika diperlukan.
+* **FR 3.2 - Action Buttons:** Harus tersedia tombol persetujuan (**Confirm**) dan penolakan (**Reject**).
+
+**Epic 4: Monitoring & Audit Trail**
+
+* **FR 4.1 - Status Tracking:** Sistem harus mencatat dan memperbarui status dokumen secara *real-time* (*Pending*, *Confirmed*, *Rejected*).
+* **FR 4.2 - Audit Trail Logging:** Sistem wajib menyimpan rekaman waktu (*timestamp*), *channel* yang digunakan, IP/Perangkat, nama *Authorized Person*, dan **konfirmasi nominal transaksi** yang disetujui.
+* **FR 4.3 - Dashboard:** Tersedianya tampilan visualisasi dan filter (berdasarkan tanggal, jenis dokumen, status, **dan *range* nominal**) untuk petugas dan supervisor.
+
+## 4. Kriteria Penerimaan Tambahan (Acceptance Criteria Updates)
+
+* **[BARU]** Sistem memvalidasi bahwa input "Nominal" hanya menerima angka dan tidak bisa dikosongkan (mandatory field) sebelum tombol "Kirim Konfirmasi" dapat ditekan.
+* **[BARU]** Nasabah dapat melihat dengan jelas angka nominal transaksi pada halaman portal konfirmasi sebelum menekan tombol "Confirm".
+
+---
+
+**Catatan untuk Anda:** Dengan penambahan nominal ini, fitur konfirmasi akan sangat membantu nasabah untuk memastikan bahwa SI yang mereka ajukan angkanya sudah tepat dan tidak diubah secara sepihak sebelum diproses oleh bank!
