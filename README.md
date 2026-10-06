@@ -70,7 +70,7 @@ python3 server.py init
 python3 server.py
 ```
 
-Perintah `init` meminta email, nama dan password untuk petugas dan SOL. Password minimal 12 karakter dan tidak ditampilkan saat diketik. Tambahkan nasabah melalui menu Data nasabah. Data demo menggunakan `example.com`, sehingga harus diganti dengan data master yang diverifikasi untuk pengiriman nyata. Setiap pengajuan menyimpan snapshot data nasabah, bukan bergantung pada perubahan data master berikutnya.
+Perintah `init` meminta email, nama dan password untuk petugas dan SOL. Password minimal 12 karakter dan tidak ditampilkan saat diketik. Hanya SOL yang dapat menambahkan nasabah melalui menu Data nasabah. Petugas memilih nasabah yang sudah didaftarkan SOL untuk membuat pengajuan. Data demo menggunakan `example.com`, sehingga harus diganti dengan data master yang diverifikasi untuk pengiriman nyata. Setiap pengajuan menyimpan snapshot data nasabah, bukan bergantung pada perubahan data master berikutnya.
 
 Password dapat diganti di menu Pengaturan akun. Sesi lain dicabut setelah perubahan password.
 

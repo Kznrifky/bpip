@@ -484,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
                 db.commit()
                 return self.respond({'ok': True})
             if path == '/api/customers':
-                require(user['role'] == 'petugas', 'Hanya petugas yang dapat menambah nasabah.', 403)
+                require(user['role'] == 'sol', 'Hanya SOL yang dapat menambah nasabah.', 403)
                 cif = text_field(data, 'cif', 30)
                 require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
                 values = (cif, text_field(data, 'name'), text_field(data, 'account', 50), text_field(data, 'person'), valid_email(text_field(data, 'email')))

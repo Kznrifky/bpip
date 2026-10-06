@@ -122,6 +122,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(other.call('/documents/'+doc_id)[0],403)
         self.assertEqual(other.call('/documents/'+doc_id+'/file')[0],403)
         self.assertEqual(other.call('/documents')[1]['documents'],[])
+    def test_only_sol_can_add_customer_and_maker_can_use_it(self):
+        customer={'cif':'888','name':'PT Baru','account':'1234','person':'Ani','email':'ani@example.com'}
+        self.assertEqual(self.maker.call('/customers',customer)[0],403)
+        self.assertEqual(self.customer.call('/customers',customer)[0],401)
+        self.assertEqual(self.sol.call('/customers',customer,csrf=False)[0],403)
+        self.assertEqual(self.sol.call('/customers',customer)[0],201)
+        self.assertEqual(self.sol.call('/customers',customer)[0],409)
+        status,result,_=self.maker.call('/customers')
+        self.assertEqual(status,200)
+        self.assertTrue(any(c['cif']=='888' for c in result['customers']))
+        self.assertEqual(self.maker.call('/documents',{'cif':'888','kind':'Warkat','nominal':100,'file':FILE})[0],201)
     def test_expired_links_validation_and_resend(self):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'confirmed','acknowledged':False})[0],400)
