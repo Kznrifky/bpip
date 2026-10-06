@@ -42,8 +42,6 @@ services:
         sync: false
       - key: SMTP_PASSWORD
         sync: false
-      - key: SMTP_FROM
-        sync: false
       - key: BOOTSTRAP_PETUGAS_EMAIL
         sync: false
       - key: BOOTSTRAP_PETUGAS_NAME

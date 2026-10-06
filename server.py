@@ -245,7 +245,7 @@ def deliver_one():
         db.execute("UPDATE outbox SET status='sending', attempts=attempts+1, next_attempt=? WHERE id=?", (time.time() + 120, row['id']))
     message = EmailMessage()
     message['Subject'] = row['subject']
-    message['From'] = os.getenv('SMTP_FROM') or 'BPIP <noreply@localhost>'
+    message['From'] = os.getenv('SMTP_FROM') or os.getenv('SMTP_USER') or 'BPIP <noreply@localhost>'
     message['To'] = row['recipient']
     message['Message-ID'] = f"<{row['id']}@{urlsplit(BASE_URL).hostname or 'localhost'}>"
     message.set_content(row['body'])
@@ -563,7 +563,7 @@ def validate_config():
     require(parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.path and not parsed.query and not parsed.fragment, 'PUBLIC_BASE_URL harus origin tanpa path.')
     require(int(os.getenv('TOKEN_TTL_HOURS', '24')) in range(1, 169), 'Masa berlaku token 1–168 jam.')
     if MAIL_MODE == 'smtp':
-        require(bool(os.getenv('SMTP_HOST')) and bool(os.getenv('SMTP_FROM')), 'SMTP_HOST dan SMTP_FROM wajib diisi.')
+        require(bool(os.getenv('SMTP_HOST')) and bool(os.getenv('SMTP_FROM') or os.getenv('SMTP_USER')), 'SMTP_HOST dan alamat pengirim (SMTP_USER atau SMTP_FROM) wajib diisi.')
         require(os.getenv('SMTP_TLS', 'starttls') in ('starttls', 'ssl'), 'SMTP wajib menggunakan starttls atau ssl.')
         require(not os.getenv('SMTP_USER') or bool(os.getenv('SMTP_PASSWORD')), 'SMTP_PASSWORD wajib untuk SMTP_USER.')
     if PRODUCTION:
