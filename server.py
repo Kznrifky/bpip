@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT, email TEXT, at REAL);
 CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
 CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT);
 CREATE TABLE IF NOT EXISTS archived_documents(doc_id TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
+CREATE TABLE IF NOT EXISTS archived_customers(cif TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS documents(
  id TEXT PRIMARY KEY, cif TEXT, customer_name TEXT, account TEXT, person TEXT, email TEXT,
  kind TEXT, nominal INTEGER, description TEXT, maker TEXT, version INTEGER,
@@ -383,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
             with database() as db:
                 user = self.session(db)
                 if path == '/api/customers':
-                    return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers ORDER BY name')]})
+                    return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers WHERE NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif) ORDER BY name')], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0] if user['role']=='sol' else 0})
                 if path == '/api/documents':
                     visible = 'NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)'
                     rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC') if user['role'] == 'sol' else db.execute('SELECT * FROM documents WHERE '+visible+' AND maker=? ORDER BY updated DESC', (user['id'],))
@@ -510,6 +511,21 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute('DELETE FROM archived_documents')
                 db.commit()
                 return self.respond({'ok':True,'count':len(docs)})
+            if path == '/api/customers/restore-all':
+                require(user['role']=='sol', 'Hanya SOL yang dapat memulihkan nasabah.', 403)
+                count=db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0]
+                db.execute('DELETE FROM archived_customers')
+                db.commit()
+                return self.respond({'ok':True,'count':count})
+            customer_archive=re.fullmatch(r'/api/customers/([0-9]{3,30})/archive',path)
+            if customer_archive:
+                require(user['role']=='sol', 'Hanya SOL yang dapat menghapus nasabah.', 403)
+                cif=customer_archive[1]
+                require(db.execute('SELECT 1 FROM customers WHERE cif=?',(cif,)).fetchone(), 'Nasabah tidak ditemukan.',404)
+                require(not db.execute('SELECT 1 FROM archived_customers WHERE cif=?',(cif,)).fetchone(), 'Nasabah sudah dihapus.',409)
+                db.execute('INSERT INTO archived_customers VALUES(?,?,?)',(cif,now(),user['id']))
+                db.commit()
+                return self.respond({'ok':True})
             if path == '/api/customers':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menambah nasabah.', 403)
                 cif = text_field(data, 'cif', 30)
@@ -525,6 +541,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(user['role'] == 'petugas', 'Hanya petugas yang dapat membuat pengajuan.', 403)
                 customer = db.execute('SELECT * FROM customers WHERE cif=?', (text_field(data, 'cif', 30),)).fetchone()
                 require(customer is not None, 'Nasabah belum terdaftar.')
+                require(not db.execute('SELECT 1 FROM archived_customers WHERE cif=?',(customer['cif'],)).fetchone(), 'Nasabah telah dihapus. Minta SOL memulihkan data nasabah.',409)
                 kind, nominal, description = transaction_fields(data)
                 upload = read_file(data)
                 doc_id = ('SI' if kind == 'Standing Instruction' else 'WK') + '-' + datetime.now().strftime('%Y') + '-' + secrets.token_hex(4).upper()
