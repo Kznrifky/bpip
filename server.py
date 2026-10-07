@@ -205,21 +205,25 @@ def enqueue(db, doc, upload, actor, ip, agent):
     subject = f"BPIP: Konfirmasi {doc['kind']} - {doc['id']} (v{doc['version']})"
     body = f"""Yth. {doc['person']},
 
-Anda menerima email ini karena alamat Anda terdaftar sebagai penerima konfirmasi untuk pengajuan berikut. Mohon periksa surat dan detail transaksi sebelum memberikan keputusan:
-Nasabah: {doc['customer_name']}
-Dokumen: {doc['id']} (versi {doc['version']})
-Jenis: {doc['kind']}
-Nominal: {amount}
+Mohon konfirmasi Anda atas surat transaksi berikut. Silakan tinjau surat dan pastikan data pengajuan sudah sesuai sebelum memberikan keputusan.
 
-Buka halaman konfirmasi untuk melihat surat, lalu pilih Setujui atau Tolak:
+Nasabah: {doc['customer_name']}
+Nomor pengajuan: {doc['id']} (versi {doc['version']})
+Jenis dokumen: {doc['kind']}
+Nominal transaksi: {amount}
+
+Untuk meninjau surat dan memberikan konfirmasi, buka tautan berikut:
 {BASE_URL}/#confirm/{token}
 
-Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam dan hanya menerima satu keputusan. Membuka email atau tautan tidak memberikan persetujuan otomatis. Jangan teruskan tautan ini kepada pihak lain.
+Pilih Setujui jika surat dan data pengajuan sudah sesuai. Jika terdapat ketidaksesuaian, pilih Tolak dan sertakan alasannya. Keputusan Anda akan tercatat dan diteruskan kepada SOL untuk pemeriksaan akhir.
 
-Jika detail tidak sesuai, pilih Tolak dan tuliskan alasan Anda. Setelah Anda memberikan konfirmasi, SOL akan memeriksa pengajuan.
+Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam sejak pengajuan dikirim dan hanya dapat digunakan untuk satu keputusan. Membuka tautan tidak berarti Anda memberikan persetujuan. Mohon tidak membagikan tautan ini kepada pihak lain.
 
-BPIP tidak meminta kata sandi, PIN, atau kode OTP melalui email ini. Jika Anda tidak mengenali pengajuan tersebut, hubungi petugas melalui kontak yang sudah Anda kenal.
+Jika Anda tidak mengenali pengajuan ini atau memerlukan bantuan, hubungi petugas melalui kontak yang biasa Anda gunakan. BPIP tidak meminta kata sandi, PIN, atau OTP melalui email.
 
+Terima kasih atas perhatian dan konfirmasi Anda.
+
+Hormat kami,
 {BANK_NAME}
 """
     db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'queued', stamp))
@@ -285,12 +289,18 @@ def build_confirmation_email(row):
         for line in paragraph.splitlines():
             if line.startswith(BASE_URL+'/#confirm/') and re.fullmatch(r'[A-Za-z0-9_-]+',line[len(BASE_URL+'/#confirm/'):]):
                 url=html.escape(line,quote=True)
-                host=html.escape(urlsplit(BASE_URL).netloc)
-                lines.append(f'<a href="{url}" style="display:inline-block;background:#0857c3;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none">Periksa surat dan beri konfirmasi</a><br><span style="font-size:12px;color:#526980">Halaman konfirmasi: {host}</span>')
+                lines.append(f'<a href="{url}" style="display:inline-block;background:#0857c3;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none">Tinjau surat dan konfirmasi</a>')
             else:
                 lines.append(html.escape(line))
-        paragraphs.append('<p style="margin:0 0 20px;line-height:1.7">'+'<br>'.join(lines)+'</p>')
-    message.add_alternative('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Konfirmasi dokumen BPIP</title></head><body style="margin:0;background:#f3f7fd;font-family:Arial,sans-serif;color:#3c3c3c"><main style="max-width:640px;margin:24px auto;padding:28px;background:#fff;border:1px solid #dce6f3"><h1 style="margin:0 0 24px;color:#0857c3;font-size:22px">Konfirmasi dokumen BPIP</h1>'+''.join(paragraphs)+'</main></body></html>',subtype='html')
+        if paragraph.startswith('Nasabah: ') and all(': ' in line for line in paragraph.splitlines()):
+            rows=[]
+            for line in paragraph.splitlines():
+                label,value=line.split(': ',1)
+                rows.append('<tr><td style="padding:8px 12px;vertical-align:top;color:#5b7188;width:36%">'+html.escape(label)+'</td><td style="padding:8px 12px;vertical-align:top;font-weight:600;overflow-wrap:anywhere">'+html.escape(value)+'</td></tr>')
+            paragraphs.append('<table role="presentation" style="border-collapse:collapse;width:100%;margin:0 0 24px;background:#f3f7fd;border:1px solid #dce6f3;font-size:14px">'+''.join(rows)+'</table>')
+        else:
+            paragraphs.append('<p style="margin:0 0 20px;line-height:1.7">'+'<br>'.join(lines)+'</p>')
+    message.add_alternative('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Konfirmasi dokumen BPIP</title></head><body style="margin:0;background:#f3f7fd;font-family:Arial,sans-serif;color:#3c3c3c"><main style="max-width:640px;margin:24px auto;padding:28px;background:#fff;border:1px solid #dce6f3"><p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:1px;color:#0857c3">BPIP · KONFIRMASI DOKUMEN</p><h1 style="margin:0 0 24px;color:#3c3c3c;font-size:22px">Konfirmasi surat transaksi</h1>'+''.join(paragraphs)+'</main></body></html>',subtype='html')
     return message, sender
 
 def deliver_one():
