@@ -166,9 +166,9 @@ class WorkflowTests(unittest.TestCase):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/archive',{'version':1})[0],403)
         self.assertEqual(self.maker.call('/documents/archive-all',{'ids':[doc_id]})[0],403)
-        self.assertEqual(self.sol.call('/documents/archive-all',{'ids':[]})[0],409)
-        self.assertEqual(self.sol.call('/documents/archive-all',{'ids':[doc_id]},csrf=False)[0],403)
-        self.assertEqual(self.sol.call('/documents/archive-all',{'ids':[doc_id]})[0],200)
+        self.assertEqual(self.sol.call('/documents/archive-all',{'ids':[],'password':'SolDemo!2026'})[0],409)
+        self.assertEqual(self.sol.call('/documents/archive-all',{'ids':[doc_id],'password':'SolDemo!2026'},csrf=False)[0],403)
+        self.assertEqual(self.sol.call('/documents/archive-all',{'ids':[doc_id],'password':'SolDemo!2026'})[0],200)
         self.assertEqual(self.maker.call('/documents')[1]['documents'],[])
         self.assertEqual(self.sol.call('/documents')[1]['archived_count'],1)
         self.assertEqual(self.maker.call('/documents/'+doc_id)[0],404)
@@ -185,9 +185,9 @@ class WorkflowTests(unittest.TestCase):
     def test_customer_delete_preserves_existing_documents_and_restore(self):
         doc_id=self.create()
         self.assertEqual(self.maker.call('/customers/1234567/archive',{})[0],403)
-        self.assertEqual(self.sol.call('/customers/1234567/archive',{},csrf=False)[0],403)
-        self.assertEqual(self.sol.call('/customers/1234567/archive',{})[0],200)
-        self.assertEqual(self.sol.call('/customers/1234567/archive',{})[0],409)
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'},csrf=False)[0],403)
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],200)
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],409)
         self.assertFalse(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
         self.assertEqual(self.sol.call('/customers')[1]['archived_count'],1)
         self.assertEqual(self.maker.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':10,'file':FILE})[0],409)
@@ -200,9 +200,49 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
     def test_single_archive_does_not_hide_other_documents(self):
         first=self.create();second=self.create()
-        self.assertEqual(self.sol.call('/documents/'+first+'/archive',{'version':2})[0],409)
-        self.assertEqual(self.sol.call('/documents/'+first+'/archive',{'version':1})[0],200)
+        self.assertEqual(self.sol.call('/documents/'+first+'/archive',{'version':2,'password':'SolDemo!2026'})[0],409)
+        self.assertEqual(self.sol.call('/documents/'+first+'/archive',{'version':1,'password':'SolDemo!2026'})[0],200)
         self.assertEqual([d['id'] for d in self.sol.call('/documents')[1]['documents']],[second])
+    def test_password_selective_restore_and_permanent_deletion(self):
+        doc=self.create()
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'wrong'})[0],403)
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],200)
+        self.assertEqual(self.maker.call('/customers/archived')[0],403)
+        self.assertEqual(self.sol.call('/customers/archived')[1]['items'][0]['cif'],'1234567')
+        self.assertEqual(self.sol.call('/customers/1234567/restore',{})[0],200)
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],200)
+        purge={'password':'SolDemo!2026','confirmation':'wrong'}
+        self.assertEqual(self.sol.call('/customers/1234567/purge',purge)[0],400)
+        purge['confirmation']='1234567'
+        self.assertEqual(self.sol.call('/customers/1234567/purge',purge)[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc)[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc+'/restore',{})[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc+'/purge',{'password':'SolDemo!2026','confirmation':doc})[0],200)
+        with app.database() as db:
+            for table,col in [('documents','id'),('versions','doc_id'),('outbox','doc_id')]:
+                self.assertEqual(db.execute(f'SELECT COUNT(*) FROM {table} WHERE {col}=?',(doc,)).fetchone()[0],0)
+            self.assertGreater(db.execute('SELECT COUNT(*) FROM audit WHERE doc_id=?',(doc,)).fetchone()[0],0)
+    def test_boh_dashboard_only_and_password_lockout(self):
+        doc=self.create()
+        account={'name':'BOH Uji','email':'boh@example.test','new_password':'ObserverTest!2026','password':'SolDemo!2026'}
+        self.assertEqual(self.maker.call('/users/boh',account)[0],403)
+        self.assertEqual(self.sol.call('/users/boh',account)[0],201)
+        self.assertEqual(self.sol.call('/users/boh',account)[0],409)
+        boh=Client(self.url)
+        status,data,_=boh.call('/login',{'email':account['email'],'password':account['new_password']})
+        self.assertEqual(status,200);boh.csrf=data['csrf']
+        rows=boh.call('/documents')[1]['documents']
+        self.assertEqual(rows[0]['id'],doc)
+        self.assertNotIn('email',rows[0]);self.assertNotIn('account',rows[0]);self.assertNotIn('file',rows[0])
+        for path in ['/customers','/outbox','/documents/'+doc,'/documents/'+doc+'/file','/customers/archived']:
+            self.assertEqual(boh.call(path)[0],403)
+        for path,payload in [('/customers',{}),('/documents',{}),('/documents/'+doc+'/review',{}),('/customers/1234567/archive',{}),('/users/boh',account)]:
+            self.assertEqual(boh.call(path,payload)[0],403)
+        for _ in range(5):
+            self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'wrong'})[0],403)
+        self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],429)
     def test_expired_links_validation_and_resend(self):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'confirmed','acknowledged':False})[0],400)

@@ -49,6 +49,8 @@ CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
 CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT);
 CREATE TABLE IF NOT EXISTS archived_documents(doc_id TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS archived_customers(cif TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
+CREATE TABLE IF NOT EXISTS management_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT, action TEXT, actor TEXT, at TEXT);
+CREATE TABLE IF NOT EXISTS password_attempts(user_id TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS documents(
  id TEXT PRIMARY KEY, cif TEXT, customer_name TEXT, account TEXT, person TEXT, email TEXT,
  kind TEXT, nominal INTEGER, description TEXT, maker TEXT, version INTEGER,
@@ -102,8 +104,8 @@ def initialize():
     os.chmod(DB_PATH, 0o600)
 
 def create_user(email, name, role, password):
-    if role not in ('petugas', 'sol') or len(password) < 12:
-        raise ValueError('Peran harus petugas/sol dan password minimal 12 karakter.')
+    if role not in ('petugas', 'sol', 'boh') or len(password) < 12:
+        raise ValueError('Peran harus petugas/sol/boh dan password minimal 12 karakter.')
     email = valid_email(email)
     with database(True) as db:
         db.execute('INSERT INTO users VALUES(?,?,?,?,?)', (secrets.token_hex(12), email, name, role, password_hash(password)))
@@ -129,6 +131,18 @@ def bootstrap_users():
         require(values[0][1] != values[1][1], 'Email petugas dan SOL harus berbeda.')
         db.executemany('INSERT INTO users VALUES(?,?,?,?,?)', values)
     return True
+
+def verify_action_password(db, user, data):
+    db.execute('DELETE FROM password_attempts WHERE at<?', (time.time()-900,))
+    require(db.execute('SELECT COUNT(*) FROM password_attempts WHERE user_id=?', (user['id'],)).fetchone()[0] < 5, 'Terlalu banyak percobaan password. Coba lagi dalam 15 menit.', 429)
+    if not password_matches(secret_field(data, 'password'), user['password']):
+        db.execute('INSERT INTO password_attempts VALUES(?,?)', (user['id'], time.time()))
+        db.commit()
+        raise AppError(403, 'Password SOL tidak sesuai.')
+    db.execute('DELETE FROM password_attempts WHERE user_id=?', (user['id'],))
+
+def management_audit(db, entity, action, user):
+    db.execute('INSERT INTO management_audit(entity,action,actor,at) VALUES(?,?,?,?)', (entity, action, user['id'], now()))
 
 class AppError(Exception):
     def __init__(self, status, message):
@@ -383,12 +397,23 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/'):
             with database() as db:
                 user = self.session(db)
+                require(user['role'] != 'boh' or path == '/api/documents', 'BOH hanya dapat memantau dashboard.', 403)
                 if path == '/api/customers':
                     return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers WHERE NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif) ORDER BY name')], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0] if user['role']=='sol' else 0})
                 if path == '/api/documents':
                     visible = 'NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)'
-                    rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC') if user['role'] == 'sol' else db.execute('SELECT * FROM documents WHERE '+visible+' AND maker=? ORDER BY updated DESC', (user['id'],))
-                    return self.respond({'documents': [document_summary(db, r) for r in rows], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_documents').fetchone()[0] if user['role']=='sol' else 0})
+                    rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC') if user['role'] in ('sol','boh') else db.execute('SELECT * FROM documents WHERE '+visible+' AND maker=? ORDER BY updated DESC', (user['id'],))
+                    summaries = [document_summary(db, r) for r in rows]
+                    if user['role']=='boh':
+                        summaries = [{k:d[k] for k in ('id','cif','customer_name','kind','nominal','version','customer_status','sol_status','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None} for d in summaries]
+                    return self.respond({'documents': summaries, 'archived_count': db.execute('SELECT COUNT(*) FROM archived_documents').fetchone()[0] if user['role']=='sol' else 0})
+                if path in ('/api/customers/archived','/api/documents/archived'):
+                    require(user['role']=='sol', 'Hanya SOL yang dapat mengelola arsip.', 403)
+                    if path.startswith('/api/customers'):
+                        rows=db.execute('SELECT c.cif,c.name,a.archived_at FROM customers c JOIN archived_customers a ON a.cif=c.cif ORDER BY a.archived_at DESC')
+                    else:
+                        rows=db.execute('SELECT d.id,d.customer_name AS name,a.archived_at FROM documents d JOIN archived_documents a ON a.doc_id=d.id ORDER BY a.archived_at DESC')
+                    return self.respond({'items':[dict(r) for r in rows]})
                 historic = re.fullmatch(r'/api/documents/([^/]+)/versions/([0-9]+)/file', path)
                 if historic:
                     doc = owned_document(db, historic[1], user)
@@ -495,9 +520,45 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute('DELETE FROM sessions WHERE user_id=? AND csrf<>?', (user['id'], user['csrf']))
                 db.commit()
                 return self.respond({'ok': True})
+            require(user['role']!='boh', 'BOH hanya dapat memantau dashboard.', 403)
+            if path == '/api/users/boh':
+                require(user['role']=='sol', 'Hanya SOL yang dapat membuat akun BOH.', 403)
+                verify_action_password(db,user,data)
+                require(not db.execute("SELECT 1 FROM users WHERE role='boh'").fetchone(), 'Akun BOH sudah tersedia.',409)
+                email=valid_email(text_field(data,'email'))
+                require(not db.execute('SELECT 1 FROM users WHERE email=?',(email,)).fetchone(), 'Email sudah digunakan.',409)
+                name=text_field(data,'name')
+                new_password=secret_field(data,'new_password')
+                require(len(new_password)>=12, 'Password BOH minimal 12 karakter.')
+                require(not PRODUCTION or new_password not in ('PetugasDemo!2026','SolDemo!2026'), 'Password demo tidak boleh digunakan di production.')
+                uid=secrets.token_hex(12)
+                db.execute('INSERT INTO users VALUES(?,?,?,?,?)',(uid,email,name,'boh',password_hash(new_password)))
+                management_audit(db,uid,'Buat akun BOH',user)
+                db.commit()
+                return self.respond({'ok':True},201)
+            item=re.fullmatch(r'/api/(customers|documents)/([^/]+)/(restore|purge)',path)
+            if item:
+                require(user['role']=='sol', 'Hanya SOL yang dapat mengelola arsip.',403)
+                kind,key,operation=item.groups()
+                table,col=('archived_customers','cif') if kind=='customers' else ('archived_documents','doc_id')
+                require(db.execute(f'SELECT 1 FROM {table} WHERE {col}=?',(key,)).fetchone(), 'Data tidak ditemukan di arsip.',404)
+                if operation=='purge':
+                    verify_action_password(db,user,data)
+                    require(data.get('confirmation')==key, 'Konfirmasi identitas data tidak sesuai.')
+                    if kind=='customers':
+                        db.execute('DELETE FROM customers WHERE cif=?',(key,))
+                    else:
+                        for child in ('outbox','versions'):
+                            db.execute(f'DELETE FROM {child} WHERE doc_id=?',(key,))
+                        db.execute('DELETE FROM documents WHERE id=?',(key,))
+                db.execute(f'DELETE FROM {table} WHERE {col}=?',(key,))
+                management_audit(db,kind+'/'+key,operation,user)
+                db.commit()
+                return self.respond({'ok':True})
             if path in ('/api/documents/archive-all', '/api/documents/restore-all'):
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus atau memulihkan pengajuan.', 403)
                 if path.endswith('/archive-all'):
+                    verify_action_password(db,user,data)
                     docs = list(db.execute('SELECT * FROM documents WHERE NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)'))
                     ids = data.get('ids')
                     require(isinstance(ids, list) and all(isinstance(i,str) for i in ids), 'Daftar pengajuan tidak valid.')
@@ -520,10 +581,12 @@ class Handler(BaseHTTPRequestHandler):
             customer_archive=re.fullmatch(r'/api/customers/([0-9]{3,30})/archive',path)
             if customer_archive:
                 require(user['role']=='sol', 'Hanya SOL yang dapat menghapus nasabah.', 403)
+                verify_action_password(db,user,data)
                 cif=customer_archive[1]
                 require(db.execute('SELECT 1 FROM customers WHERE cif=?',(cif,)).fetchone(), 'Nasabah tidak ditemukan.',404)
                 require(not db.execute('SELECT 1 FROM archived_customers WHERE cif=?',(cif,)).fetchone(), 'Nasabah sudah dihapus.',409)
                 db.execute('INSERT INTO archived_customers VALUES(?,?,?)',(cif,now(),user['id']))
+                management_audit(db,'customers/'+cif,'archive',user)
                 db.commit()
                 return self.respond({'ok':True})
             if path == '/api/customers':
@@ -558,6 +621,7 @@ class Handler(BaseHTTPRequestHandler):
             operation = match[2]
             if operation == 'archive':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus pengajuan.', 403)
+                verify_action_password(db,user,data)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 archive_document(db, doc, user, ip, agent)
             elif operation == 'cancel':

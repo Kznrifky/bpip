@@ -101,3 +101,9 @@ Nomor rekening untuk nasabah baru harus terdiri dari tepat 15 digit, termasuk no
 SOL dapat menghapus satu pengajuan lewat halaman detail, atau semua pengajuan lewat Antrean review → Hapus semua pengajuan. Tindakan ini mengosongkan daftar bagi SOL dan petugas dengan memindahkan pengajuan ke arsip. Akun, data nasabah, surat, dan audit tetap tersimpan. Tombol Pulihkan pengajuan mengembalikan seluruh arsip ke daftar; tautan nasabah lama tetap tidak berlaku. Untuk pengajuan yang masih menunggu nasabah, petugas dapat meminta tautan baru. Penghapusan meminta konfirmasi dan tidak menjalankan pengiriman email baru.
 
 Pencarian nama nasabah atau CIF tersedia pada tabel Data nasabah (SOL) dan formulir Pengajuan baru (petugas). SOL dapat menghapus nasabah dari daftar dan memulihkannya; nasabah yang dihapus tidak dapat dipilih untuk pengajuan baru. Pengajuan lama menggunakan snapshot sehingga surat, konfirmasi, dan revisinya tetap tersedia.
+
+### Arsip dan pemantauan BOH
+
+SOL menghapus nasabah/pengajuan ke arsip dengan password akun yang sedang login. Tombol Pulihkan membuka daftar arsip untuk pemulihan per data. Hapus permanen hanya tersedia di arsip, memerlukan password SOL serta CIF/ID yang diketik ulang. Penghapusan master nasabah mempertahankan snapshot surat dan pengajuan lama. Penghapusan permanen pengajuan menghapus dokumen, semua file versinya, dan antrean email; catatan audit tetap disimpan. Tautan lama tidak diaktifkan kembali saat pemulihan.
+
+SOL dapat membuat satu akun BOH melalui Pengaturan akun → Buat akun BOH. Isi nama, email, password baru minimal 12 karakter, dan password SOL langsung di aplikasi. BOH hanya dapat membaca ringkasan dashboard semua pengajuan dan mengelola password akun sendiri. API BOH menolak akses master nasabah, surat, audit detail, email, dan semua tindakan operasional.
