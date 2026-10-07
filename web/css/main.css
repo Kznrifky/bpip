@@ -59,3 +59,6 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 
 /* Align KPI descriptions to the bottom; SOL has four summary cards. */
 .stats-sol{grid-template-columns:repeat(4,minmax(0,1fr))}.stats .stat{display:flex;flex-direction:column;min-height:200px}.stats .stat-foot{margin-top:auto;padding-top:12px;min-height:0}@media(max-width:1099px){.stats-sol{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Center KPI content while keeping each status icon in the top right. */
+.stats .stat-label{position:relative;display:block;padding-inline:20px;text-align:center}.stats .stat-label strong{display:block}.stats .stat-label svg{position:absolute;right:0;top:1px}.stats .stat-value,.stats .stat-foot{text-align:center}
