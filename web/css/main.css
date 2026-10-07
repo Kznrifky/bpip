@@ -64,3 +64,6 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 .stats .stat-label{position:relative;display:block;padding-inline:20px;text-align:center}.stats .stat-label strong{display:block}.stats .stat-label svg{position:absolute;right:0;top:1px}.stats .stat-value,.stats .stat-foot{text-align:center}
 
 .stats .stat-label{padding-inline:0}
+
+/* Keep history document actions equal-sized and aligned to the right edge. */
+.history-table th:last-child,.history-table td:last-child{text-align:right;width:1%}.history-actions{justify-content:flex-end;flex-wrap:nowrap;gap:8px}.history-actions .btn{width:132px;min-width:132px;height:40px;min-height:40px;padding:8px 12px;justify-content:center}
