@@ -293,6 +293,7 @@ def build_confirmation_email(row):
     message.set_content(row['body'])
     # HTML mirrors the plain text; only the actual BPIP confirmation link is clickable.
     paragraphs=[]
+    security_open = False
     for paragraph in row['body'].strip().split('\n\n'):
         lines=[]
         for line in paragraph.splitlines():
@@ -311,9 +312,13 @@ def build_confirmation_email(row):
         elif paragraph.startswith('Informasi keamanan:') or paragraph.startswith('Tautan berlaku '):
             points = paragraph.splitlines()[1:] if paragraph.startswith('Informasi keamanan:') else re.split(r'(?<=\.)\s+', paragraph)
             items = ''.join('<li style="margin:0 0 6px;padding-left:2px">'+html.escape(point.removeprefix('- '))+'</li>' for point in points if point)
-            paragraphs.append('<table role="presentation" width="100%" style="margin:0 0 20px;background:#edf6fd;border-radius:8px"><tr><td style="padding:18px;color:#3c3c3c;line-height:1.7"><strong style="display:block;color:#0857c3;font-size:16px;margin-bottom:8px">Informasi keamanan</strong><ul style="margin:0;padding-left:20px">'+items+'</ul></td></tr></table>')
+            security_open = True
+            paragraphs.append('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#edf6fd" style="margin:0 0 20px;background:#edf6fd;border:1px solid #dce6f3;border-radius:8px"><tr><td style="padding:18px;color:#3c3c3c;line-height:1.7"><strong style="display:block;color:#0857c3;font-size:16px;margin-bottom:8px">Informasi keamanan</strong><ul style="margin:0 0 20px;padding-left:20px">'+items+'</ul>')
         else:
-            paragraphs.append('<p style="margin:0 0 20px;line-height:1.7">'+'<br>'.join(lines)+'</p>')
+            margin = '0' if security_open and paragraph.startswith('Hormat kami,') else '0 0 20px'
+            paragraphs.append('<p style="margin:'+margin+';line-height:1.7">'+'<br>'.join(lines)+'</p>')
+    if security_open:
+        paragraphs.append('</td></tr></table>')
     email_html = '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Konfirmasi dokumen BRI VISTA</title></head><body style="margin:0;padding:0;background:#f3f7fd;font-family:Arial,sans-serif;font-size:14px;color:#3c3c3c"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px"><tr><td style="background:#fff;border-bottom:5px solid #0857c3;border-radius:10px;padding:22px 26px;color:#0857c3"><strong style="font-size:26px">BRI VISTA</strong><span style="display:block;font-size:12px;margin-top:4px;color:#5b7188">Verification, Integration &amp; Secure Tracking Application</span></td></tr><tr><td style="height:16px"></td></tr><tr><td style="background:#fff;border:1px solid #dce6f3;border-radius:10px;padding:26px"><h1 style="margin:0 0 26px;color:#0857c3;font-size:25px;line-height:1.35">Konfirmasi surat transaksi</h1>'+''.join(paragraphs)+'<p style="padding-top:20px;border-top:1px solid #dce6f3;text-align:center;font-size:12px;color:#5b7188;margin:0">BRI VISTA<br>Verification, Integration &amp; Secure Tracking Application</p></td></tr></table></td></tr></table></body></html>'
     message.add_alternative(email_html, subtype='html')
     return message, sender
