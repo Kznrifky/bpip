@@ -133,9 +133,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertTrue(any(c['cif']=='888' for c in result['customers']))
         self.assertEqual(self.maker.call('/documents',{'cif':'888','kind':'Warkat','nominal':100,'file':FILE})[0],201)
-    def test_account_requires_at_least_fifteen_digits(self):
+    def test_account_requires_exactly_fifteen_digits(self):
         customer={'cif':'889','name':'Uji','account':'12345678901234','person':'Ani','email':'ani@example.com'}
-        for account in ('12345678901234','12345678901234x','1'*51):
+        for account in ('12345678901234','12345678901234x','1234567890123456','1'*51):
             customer['account']=account
             self.assertEqual(self.sol.call('/customers',customer)[0],400)
         customer['account']='000123456789012'

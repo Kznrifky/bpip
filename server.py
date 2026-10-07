@@ -489,7 +489,7 @@ class Handler(BaseHTTPRequestHandler):
                 cif = text_field(data, 'cif', 30)
                 require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
                 account = text_field(data, 'account', 50)
-                require(re.fullmatch(r'[0-9]{15,50}', account), 'Nomor rekening harus berupa 15–50 digit angka.')
+                require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
                 values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')))
                 require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (cif,)).fetchone(), 'CIF sudah terdaftar.', 409)
                 db.execute('INSERT INTO customers VALUES(?,?,?,?,?)', values)
