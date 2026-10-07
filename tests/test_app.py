@@ -227,9 +227,9 @@ class WorkflowTests(unittest.TestCase):
     def test_boh_dashboard_only_and_password_lockout(self):
         doc=self.create()
         account={'name':'BOH Uji','email':'boh@example.test','new_password':'ObserverTest!2026','password':'SolDemo!2026'}
-        self.assertEqual(self.maker.call('/users/boh',account)[0],403)
-        self.assertEqual(self.sol.call('/users/boh',account)[0],201)
-        self.assertEqual(self.sol.call('/users/boh',account)[0],409)
+        self.assertEqual(self.maker.call('/users/boh',account)[0],404)
+        self.assertEqual(self.sol.call('/users/boh',account)[0],404)
+        app.create_user(account['email'],account['name'],'boh',account['new_password'])
         boh=Client(self.url)
         status,data,_=boh.call('/login',{'email':account['email'],'password':account['new_password']})
         self.assertEqual(status,200);boh.csrf=data['csrf']
