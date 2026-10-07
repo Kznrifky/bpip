@@ -298,7 +298,7 @@ def build_confirmation_email(row):
         for line in paragraph.splitlines():
             if line.startswith(BASE_URL+'/#confirm/') and re.fullmatch(r'[A-Za-z0-9_-]+',line[len(BASE_URL+'/#confirm/'):]):
                 url=html.escape(line,quote=True)
-                lines.append(f'<a href="{url}" style="display:block;background:#0857c3;color:#fff;padding:16px 20px;border-radius:8px;text-decoration:none;text-align:center;font-weight:700">Tinjau surat dan konfirmasi</a>')
+                lines.append(f'<a href="{url}" style="display:block;margin-top:12px;background:#0857c3;color:#fff;padding:16px 20px;border-radius:8px;text-decoration:none;text-align:center;font-weight:700">Tinjau surat dan konfirmasi</a>')
             else:
                 lines.append(html.escape(line))
         if paragraph.startswith('Nasabah: ') and all(': ' in line for line in paragraph.splitlines()):
