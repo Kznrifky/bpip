@@ -70,3 +70,5 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 
 /* Align history headers with the content in each column. */
 .history-table th,.history-table td{text-align:center}.history-table th:last-child{text-align:center}
+
+.page-heading{align-items:center}.settings-page .page-heading{align-items:center}@media(max-width:760px){.page-heading{flex-wrap:wrap;gap:16px}}
