@@ -67,3 +67,6 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 
 /* Keep history document actions equal-sized and aligned to the right edge. */
 .history-table th:last-child,.history-table td:last-child{text-align:right;width:1%}.history-actions{justify-content:flex-end;flex-wrap:nowrap;gap:8px}.history-actions .btn{width:132px;min-width:132px;height:40px;min-height:40px;padding:8px 12px;justify-content:center}
+
+/* Align history headers with the content in each column. */
+.history-table th,.history-table td{text-align:center}.history-table th:last-child{text-align:center}
