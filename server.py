@@ -222,15 +222,18 @@ Untuk meninjau surat dan memberikan konfirmasi, buka tautan berikut:
 
 Pilih Setujui jika surat dan data pengajuan sudah sesuai. Jika terdapat ketidaksesuaian, pilih Tolak dan sertakan alasannya. Keputusan Anda akan tercatat dan diteruskan kepada SOL untuk pemeriksaan akhir.
 
-Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam sejak pengajuan dikirim dan hanya dapat digunakan untuk satu keputusan. Membuka tautan tidak berarti Anda memberikan persetujuan. Mohon tidak membagikan tautan ini kepada pihak lain.
+Informasi keamanan:
+- Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam sejak pengajuan dikirim.
+- Tautan hanya dapat digunakan untuk satu keputusan.
+- Membuka tautan tidak berarti Anda memberikan persetujuan.
+- Jangan membagikan tautan ini kepada pihak lain.
 
 Jika Anda tidak mengenali pengajuan ini atau memerlukan bantuan, hubungi petugas melalui kontak yang biasa Anda gunakan. BRI VISTA tidak meminta kata sandi, PIN, atau OTP melalui email.
 
 Terima kasih atas perhatian dan konfirmasi Anda.
 
 Hormat kami,
-{APP_NAME}
-{APP_TAGLINE}
+BRI Jakarta Sudirman 1
 """
     db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'queued', stamp))
     add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Email: {doc['email']} · {amount}", ip, agent)
@@ -303,10 +306,12 @@ def build_confirmation_email(row):
             for line in paragraph.splitlines():
                 label,value=line.split(': ',1)
                 rows.append('<tr><td style="padding:8px 12px;vertical-align:top;color:#5b7188;width:36%">'+html.escape(label)+'</td><td style="padding:8px 12px;vertical-align:top;font-weight:600;overflow-wrap:anywhere">'+html.escape(value)+'</td></tr>')
-            rows.append('<tr><td valign="middle" style="padding:8px 12px;vertical-align:middle;color:#5b7188;width:36%;line-height:20px">Status</td><td valign="middle" style="padding:8px 12px;vertical-align:middle;line-height:20px"><span style="display:inline-block;vertical-align:middle;padding:6px 10px;background:#fff5df;border-radius:16px;color:#946200;font-weight:600;line-height:20px;margin:0">Menunggu konfirmasi</span></td></tr>')
+            rows.append('<tr><td valign="middle" style="padding:8px 12px;vertical-align:middle;color:#5b7188;width:36%;line-height:20px">Status</td><td valign="middle" style="padding:8px 12px;vertical-align:middle;line-height:20px"><strong style="color:#3c3c3c;line-height:20px">Menunggu Konfirmasi</strong></td></tr>')
             paragraphs.append('<table role="presentation" style="border-collapse:collapse;width:100%;margin:0 0 24px;border:1px solid #dce6f3;font-size:14px"><tr><td colspan="2" style="background:#edf6fd;color:#0857c3;padding:16px 12px;font-weight:700;font-size:17px">Ringkasan dokumen</td></tr>'+''.join(rows)+'</table>')
-        elif paragraph.startswith('Tautan berlaku '):
-            paragraphs.append('<table role="presentation" width="100%" style="margin:0 0 20px;background:#edf6fd;border-radius:8px"><tr><td style="padding:18px;color:#3c3c3c;line-height:1.7"><strong style="display:block;color:#0857c3;font-size:16px;margin-bottom:8px">Informasi keamanan</strong>'+'<br>'.join(lines)+'</td></tr></table>')
+        elif paragraph.startswith('Informasi keamanan:') or paragraph.startswith('Tautan berlaku '):
+            points = paragraph.splitlines()[1:] if paragraph.startswith('Informasi keamanan:') else re.split(r'(?<=\.)\s+', paragraph)
+            items = ''.join('<li style="margin:0 0 6px;padding-left:2px">'+html.escape(point.removeprefix('- '))+'</li>' for point in points if point)
+            paragraphs.append('<table role="presentation" width="100%" style="margin:0 0 20px;background:#edf6fd;border-radius:8px"><tr><td style="padding:18px;color:#3c3c3c;line-height:1.7"><strong style="display:block;color:#0857c3;font-size:16px;margin-bottom:8px">Informasi keamanan</strong><ul style="margin:0;padding-left:20px">'+items+'</ul></td></tr></table>')
         else:
             paragraphs.append('<p style="margin:0 0 20px;line-height:1.7">'+'<br>'.join(lines)+'</p>')
     email_html = '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Konfirmasi dokumen BRI VISTA</title></head><body style="margin:0;padding:0;background:#f3f7fd;font-family:Arial,sans-serif;font-size:14px;color:#3c3c3c"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px"><tr><td style="background:#fff;border-bottom:5px solid #0857c3;border-radius:10px;padding:22px 26px;color:#0857c3"><strong style="font-size:26px">BRI VISTA</strong><span style="display:block;font-size:12px;margin-top:4px;color:#5b7188">Verification, Integration &amp; Secure Tracking Application</span></td></tr><tr><td style="height:16px"></td></tr><tr><td style="background:#fff;border:1px solid #dce6f3;border-radius:10px;padding:26px"><h1 style="margin:0 0 26px;color:#0857c3;font-size:25px;line-height:1.35">Konfirmasi surat transaksi</h1>'+''.join(paragraphs)+'<p style="padding-top:20px;border-top:1px solid #dce6f3;text-align:center;font-size:12px;color:#5b7188;margin:0">BRI VISTA<br>Verification, Integration &amp; Secure Tracking Application</p></td></tr></table></td></tr></table></body></html>'
