@@ -62,3 +62,5 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 
 /* Center KPI content while keeping each status icon in the top right. */
 .stats .stat-label{position:relative;display:block;padding-inline:20px;text-align:center}.stats .stat-label strong{display:block}.stats .stat-label svg{position:absolute;right:0;top:1px}.stats .stat-value,.stats .stat-foot{text-align:center}
+
+.stats .stat-label{padding-inline:0}
