@@ -72,3 +72,7 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 .history-table th,.history-table td{text-align:center}.history-table th:last-child{text-align:center}
 
 .page-heading{align-items:center}.settings-page .page-heading{align-items:center}@media(max-width:760px){.page-heading{flex-wrap:wrap;gap:16px}}
+
+/* Consistent submission status boxes and a dedicated date-filter row. */
+.submission-table td:nth-child(3) .badge,.submission-table td:nth-child(4) .badge{width:176px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:6px;white-space:nowrap}
+.date-filters{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 24px;border-bottom:1px solid var(--line);background:#fff}.date-filters>strong{font-size:11px;color:var(--muted);margin-right:4px}.date-field{display:flex;align-items:center;gap:8px}.date-field label{font-size:11px;color:var(--muted)}.date-field .input{width:152px;height:40px;min-height:40px;font-size:11px;padding:8px 10px}.date-filters .btn{height:40px}@media(max-width:760px){.date-filters{padding:14px 18px;gap:10px}.date-filters>strong{width:100%}.date-field{flex:1;min-width:145px;flex-direction:column;align-items:stretch;gap:5px}.date-field .input{width:100%;min-width:0}.date-filters .btn{margin-left:auto}}
