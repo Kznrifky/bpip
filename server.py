@@ -303,11 +303,11 @@ def build_confirmation_email(row):
                 lines.append(html.escape(line))
         if paragraph.startswith('Nasabah: ') and all(': ' in line for line in paragraph.splitlines()):
             rows=[]
-            for line in paragraph.splitlines():
-                label,value=line.split(': ',1)
-                rows.append('<tr><td style="padding:8px 12px;vertical-align:top;color:#5b7188;width:36%">'+html.escape(label)+'</td><td style="padding:8px 12px;vertical-align:top;font-weight:600;overflow-wrap:anywhere">'+html.escape(value)+'</td></tr>')
-            rows.append('<tr><td valign="middle" style="padding:8px 12px;vertical-align:middle;color:#5b7188;width:36%;line-height:20px">Status</td><td valign="middle" style="padding:8px 12px;vertical-align:middle;line-height:20px"><strong style="color:#3c3c3c;line-height:20px">Menunggu Konfirmasi</strong></td></tr>')
-            paragraphs.append('<table role="presentation" style="border-collapse:collapse;width:100%;margin:0 0 24px;border:1px solid #dce6f3;font-size:14px"><tr><td colspan="2" style="background:#edf6fd;color:#0857c3;padding:16px 12px;font-weight:700;font-size:17px">Ringkasan dokumen</td></tr>'+''.join(rows)+'</table>')
+            fields = [line.split(': ', 1) for line in paragraph.splitlines()]
+            fields.append(('Status', 'Menunggu Konfirmasi'))
+            for label, value in fields:
+                rows.append('<tr><td valign="middle" style="padding:12px 16px;vertical-align:middle;color:#5b7188;width:36%;line-height:22px;border-top:1px solid #dce6f3">'+html.escape(label)+'</td><td valign="middle" style="padding:12px 16px;vertical-align:middle;color:#3c3c3c;font-weight:600;line-height:22px;border-top:1px solid #dce6f3;overflow-wrap:anywhere">'+html.escape(value)+'</td></tr>')
+            paragraphs.append('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#edf6fd" style="border-collapse:collapse;width:100%;margin:0 0 20px;border:1px solid #dce6f3;background:#edf6fd;font-size:14px"><tr><td colspan="2" align="center" bgcolor="#0857c3" style="background:#0857c3;color:#ffffff;text-align:center;padding:16px;font-weight:700;font-size:17px;line-height:24px">Ringkasan Transaksi</td></tr>'+''.join(rows)+'</table>')
         elif paragraph.startswith('Informasi keamanan:') or paragraph.startswith('Tautan berlaku '):
             points = paragraph.splitlines()[1:] if paragraph.startswith('Informasi keamanan:') else re.split(r'(?<=\.)\s+', paragraph)
             items = ''.join('<li style="margin:0 0 6px;padding-left:2px">'+html.escape(point.removeprefix('- '))+'</li>' for point in points if point)
