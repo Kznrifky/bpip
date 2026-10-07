@@ -113,7 +113,7 @@ class WorkflowTests(unittest.TestCase):
         doc_id=self.create()
         self.assertEqual(self.sol.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':1,'file':FILE})[0],403)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved'})[0],403)
-        self.assertEqual(self.maker.call('/customers',{'cif':'888','name':'PT Baru','account':'1234','person':'Ani','email':'ani@example.com'},csrf=False)[0],403)
+        self.assertEqual(self.maker.call('/customers',{'cif':'888','name':'PT Baru','account':'000123456789012','person':'Ani','email':'ani@example.com'},csrf=False)[0],403)
         self.assertEqual(self.maker.call('/logout',{},origin='https://evil.example')[0],403)
         app.create_user('other@example.com','Other maker','petugas','OtherSecret!2026')
         other=Client(self.url)
@@ -123,7 +123,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(other.call('/documents/'+doc_id+'/file')[0],403)
         self.assertEqual(other.call('/documents')[1]['documents'],[])
     def test_only_sol_can_add_customer_and_maker_can_use_it(self):
-        customer={'cif':'888','name':'PT Baru','account':'1234','person':'Ani','email':'ani@example.com'}
+        customer={'cif':'888','name':'PT Baru','account':'000123456789012','person':'Ani','email':'ani@example.com'}
         self.assertEqual(self.maker.call('/customers',customer)[0],403)
         self.assertEqual(self.customer.call('/customers',customer)[0],401)
         self.assertEqual(self.sol.call('/customers',customer,csrf=False)[0],403)
@@ -133,6 +133,35 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertTrue(any(c['cif']=='888' for c in result['customers']))
         self.assertEqual(self.maker.call('/documents',{'cif':'888','kind':'Warkat','nominal':100,'file':FILE})[0],201)
+    def test_account_requires_at_least_fifteen_digits(self):
+        customer={'cif':'889','name':'Uji','account':'12345678901234','person':'Ani','email':'ani@example.com'}
+        for account in ('12345678901234','12345678901234x','1'*51):
+            customer['account']=account
+            self.assertEqual(self.sol.call('/customers',customer)[0],400)
+        customer['account']='000123456789012'
+        self.assertEqual(self.sol.call('/customers',customer)[0],201)
+        rows=self.maker.call('/customers')[1]['customers']
+        self.assertEqual(next(c['account'] for c in rows if c['cif']=='889'),customer['account'])
+    def test_cancel_preserves_history_and_invalidates_customer_link(self):
+        doc_id=self.create();token=self.token(doc_id)
+        payload={'version':1,'notes':'Transaksi tidak dilanjutkan'}
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/cancel',payload)[0],403)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':''})[0],400)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':2,'notes':'Uji'})[0],409)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',payload)[0],200)
+        self.assertEqual(self.customer.call('/portal',{'token':token})[0],410)
+        self.assertEqual(self.respond(token)[0],410)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/resend',{'version':1})[0],409)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',{'version':1})[0],409)
+        d=self.maker.call('/documents/'+doc_id)[1]['document']
+        self.assertEqual(d['sol_status'],'cancelled')
+        self.assertEqual(len(d['versions']),1)
+        self.assertTrue(any(a['notes']==payload['notes'] for a in d['audit']))
+        self.assertFalse(app.deliver_one())
+    def test_final_sol_decision_cannot_be_cancelled(self):
+        doc_id=self.create();self.respond(self.token(doc_id))
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],200)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':'Uji'})[0],409)
     def test_expired_links_validation_and_resend(self):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'confirmed','acknowledged':False})[0],400)

@@ -225,6 +225,7 @@ def portal_document(db, token):
     version = db.execute('SELECT * FROM versions WHERE token_hash=?', (digest(token),)).fetchone()
     require(version is not None, 'Tautan konfirmasi tidak ditemukan.', 404)
     doc = db.execute('SELECT * FROM documents WHERE id=?', (version['doc_id'],)).fetchone()
+    require(doc['sol_status'] != 'cancelled', 'Pengajuan telah dibatalkan oleh petugas.', 410)
     require(doc['version'] == version['version'], 'Surat telah direvisi. Gunakan tautan dari email terbaru.', 410)
     require(not version['used_at'], 'Keputusan Anda sudah tercatat. Tautan ini telah digunakan.', 410)
     require(version['expires'] > time.time(), 'Tautan telah kedaluwarsa. Hubungi petugas untuk meminta email baru.', 410)
@@ -239,7 +240,7 @@ def deliver_one():
             return False
         doc = db.execute('SELECT * FROM documents WHERE id=?', (row['doc_id'],)).fetchone()
         version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (row['doc_id'], row['version'])).fetchone()
-        if not doc or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time():
+        if not doc or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time():
             db.execute("UPDATE outbox SET status='cancelled' WHERE id=?", (row['id'],))
             return True
         db.execute("UPDATE outbox SET status='sending', attempts=attempts+1, next_attempt=? WHERE id=?", (time.time() + 120, row['id']))
@@ -487,7 +488,9 @@ class Handler(BaseHTTPRequestHandler):
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menambah nasabah.', 403)
                 cif = text_field(data, 'cif', 30)
                 require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
-                values = (cif, text_field(data, 'name'), text_field(data, 'account', 50), text_field(data, 'person'), valid_email(text_field(data, 'email')))
+                account = text_field(data, 'account', 50)
+                require(re.fullmatch(r'[0-9]{15,50}', account), 'Nomor rekening harus berupa 15–50 digit angka.')
+                values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')))
                 require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (cif,)).fetchone(), 'CIF sudah terdaftar.', 409)
                 db.execute('INSERT INTO customers VALUES(?,?,?,?,?)', values)
                 db.commit()
@@ -506,11 +509,20 @@ class Handler(BaseHTTPRequestHandler):
                 enqueue(db, doc, upload, user['name'], ip, agent)
                 db.commit()
                 return self.respond({'id': doc_id}, 201)
-            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend)', path)
+            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|cancel)', path)
             require(match is not None, 'Endpoint tidak ditemukan.', 404)
             doc = owned_document(db, match[1], user)
             operation = match[2]
-            if operation == 'review':
+            if operation == 'cancel':
+                require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat membatalkan pengajuan.', 403)
+                require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
+                require(doc['sol_status'] in ('pending', 'revision_requested'), 'Pengajuan dengan keputusan akhir tidak dapat dibatalkan.', 409)
+                notes = text_field(data, 'notes', 1500)
+                db.execute("UPDATE documents SET sol_status='cancelled',updated=? WHERE id=?", (now(), doc['id']))
+                db.execute('UPDATE versions SET expires=0 WHERE doc_id=?', (doc['id'],))
+                db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND status IN ('queued','retry','failed')", (doc['id'],))
+                add_audit(db, doc, 'Petugas membatalkan pengajuan', user['name'], notes, ip, agent)
+            elif operation == 'review':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat memutuskan pengajuan.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 require(doc['customer_status'] in ('confirmed', 'rejected'), 'Tunggu respons nasabah sebelum melakukan review.', 409)
