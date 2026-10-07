@@ -54,3 +54,5 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 .execution-output{display:flex;justify-content:space-between;align-items:center;gap:20px;background:#f0f6ff;border-color:#cbdff7}.execution-output h2{color:#0857c3}.execution-output p{font-size:12px;margin-top:6px}@media(max-width:760px){.execution-output{align-items:stretch;flex-direction:column}.execution-output .btn{white-space:normal}}
 
 .brand strong{font-size:17px;letter-spacing:.5px}.brand small{font-size:8px;letter-spacing:.1px;line-height:1.5;max-width:155px}.workspace-footer{flex-wrap:wrap}.workspace-footer>span:first-child{max-width:100%;overflow-wrap:anywhere}
+
+.badge.history-success{background:#e7f6ef;color:#18794e}.badge.history-failure{background:#fceeee;color:#bd3434}
