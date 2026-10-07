@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT, csrf TE
 CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT, email TEXT, at REAL);
 CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
 CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT);
+CREATE TABLE IF NOT EXISTS archived_documents(doc_id TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS documents(
  id TEXT PRIMARY KEY, cif TEXT, customer_name TEXT, account TEXT, person TEXT, email TEXT,
  kind TEXT, nominal INTEGER, description TEXT, maker TEXT, version INTEGER,
@@ -218,13 +219,21 @@ def owned_document(db, doc_id, user):
     doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
     require(doc is not None, 'Pengajuan tidak ditemukan.', 404)
     require(user['role'] == 'sol' or doc['maker'] == user['id'], 'Anda tidak memiliki akses ke pengajuan ini.', 403)
+    require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc_id,)).fetchone(), 'Pengajuan telah dihapus dari daftar. SOL dapat memulihkannya.', 404)
     return doc
+
+def archive_document(db, doc, user, ip, agent):
+    db.execute('INSERT INTO archived_documents VALUES(?,?,?)', (doc['id'], now(), user['id']))
+    db.execute('UPDATE versions SET expires=0 WHERE doc_id=?', (doc['id'],))
+    db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND status IN ('queued','retry','failed')", (doc['id'],))
+    add_audit(db, doc, 'SOL menghapus pengajuan dari daftar', user['name'] + ' (SOL)', 'Disimpan di arsip dan dapat dipulihkan. Tautan konfirmasi dinonaktifkan.', ip, agent)
 
 def portal_document(db, token):
     require(isinstance(token, str) and 20 <= len(token) <= 100, 'Tautan konfirmasi tidak valid.', 404)
     version = db.execute('SELECT * FROM versions WHERE token_hash=?', (digest(token),)).fetchone()
     require(version is not None, 'Tautan konfirmasi tidak ditemukan.', 404)
     doc = db.execute('SELECT * FROM documents WHERE id=?', (version['doc_id'],)).fetchone()
+    require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc['id'],)).fetchone(), 'Pengajuan sudah dihapus dari daftar.', 410)
     require(doc['sol_status'] != 'cancelled', 'Pengajuan telah dibatalkan oleh petugas.', 410)
     require(doc['version'] == version['version'], 'Surat telah direvisi. Gunakan tautan dari email terbaru.', 410)
     require(not version['used_at'], 'Keputusan Anda sudah tercatat. Tautan ini telah digunakan.', 410)
@@ -240,7 +249,7 @@ def deliver_one():
             return False
         doc = db.execute('SELECT * FROM documents WHERE id=?', (row['doc_id'],)).fetchone()
         version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (row['doc_id'], row['version'])).fetchone()
-        if not doc or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time():
+        if not doc or db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (row['doc_id'],)).fetchone() or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time():
             db.execute("UPDATE outbox SET status='cancelled' WHERE id=?", (row['id'],))
             return True
         db.execute("UPDATE outbox SET status='sending', attempts=attempts+1, next_attempt=? WHERE id=?", (time.time() + 120, row['id']))
@@ -376,8 +385,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path == '/api/customers':
                     return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers ORDER BY name')]})
                 if path == '/api/documents':
-                    rows = db.execute('SELECT * FROM documents ORDER BY updated DESC') if user['role'] == 'sol' else db.execute('SELECT * FROM documents WHERE maker=? ORDER BY updated DESC', (user['id'],))
-                    return self.respond({'documents': [document_summary(db, r) for r in rows]})
+                    visible = 'NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)'
+                    rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC') if user['role'] == 'sol' else db.execute('SELECT * FROM documents WHERE '+visible+' AND maker=? ORDER BY updated DESC', (user['id'],))
+                    return self.respond({'documents': [document_summary(db, r) for r in rows], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_documents').fetchone()[0] if user['role']=='sol' else 0})
                 historic = re.fullmatch(r'/api/documents/([^/]+)/versions/([0-9]+)/file', path)
                 if historic:
                     doc = owned_document(db, historic[1], user)
@@ -484,6 +494,22 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute('DELETE FROM sessions WHERE user_id=? AND csrf<>?', (user['id'], user['csrf']))
                 db.commit()
                 return self.respond({'ok': True})
+            if path in ('/api/documents/archive-all', '/api/documents/restore-all'):
+                require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus atau memulihkan pengajuan.', 403)
+                if path.endswith('/archive-all'):
+                    docs = list(db.execute('SELECT * FROM documents WHERE NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)'))
+                    ids = data.get('ids')
+                    require(isinstance(ids, list) and all(isinstance(i,str) for i in ids), 'Daftar pengajuan tidak valid.')
+                    require(len(ids)==len(docs) and set(ids)=={d['id'] for d in docs}, 'Daftar pengajuan berubah. Muat ulang dan konfirmasi kembali.', 409)
+                    for doc in docs:
+                        archive_document(db, doc, user, ip, agent)
+                else:
+                    docs = list(db.execute('SELECT d.* FROM documents d JOIN archived_documents a ON a.doc_id=d.id'))
+                    for doc in docs:
+                        add_audit(db, doc, 'SOL memulihkan pengajuan', user['name']+' (SOL)', 'Tautan konfirmasi lama tetap tidak berlaku.', ip, agent)
+                    db.execute('DELETE FROM archived_documents')
+                db.commit()
+                return self.respond({'ok':True,'count':len(docs)})
             if path == '/api/customers':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menambah nasabah.', 403)
                 cif = text_field(data, 'cif', 30)
@@ -509,11 +535,15 @@ class Handler(BaseHTTPRequestHandler):
                 enqueue(db, doc, upload, user['name'], ip, agent)
                 db.commit()
                 return self.respond({'id': doc_id}, 201)
-            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|cancel)', path)
+            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|cancel|archive)', path)
             require(match is not None, 'Endpoint tidak ditemukan.', 404)
             doc = owned_document(db, match[1], user)
             operation = match[2]
-            if operation == 'cancel':
+            if operation == 'archive':
+                require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus pengajuan.', 403)
+                require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
+                archive_document(db, doc, user, ip, agent)
+            elif operation == 'cancel':
                 require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat membatalkan pengajuan.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 require(doc['sol_status'] in ('pending', 'revision_requested'), 'Pengajuan dengan keputusan akhir tidak dapat dibatalkan.', 409)
