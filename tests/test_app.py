@@ -1,5 +1,6 @@
 """Integration checks against an actual HTTP server and temporary SQLite DB."""
 import base64
+from io import BytesIO
 import concurrent.futures
 import http.cookiejar
 import importlib.util
@@ -13,6 +14,9 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPCookieProcessor
 from unittest.mock import patch
+from pypdf import PdfReader
+from reportlab.pdfgen import canvas
+from PIL import Image
 
 spec = importlib.util.spec_from_file_location('bpip', Path(__file__).resolve().parents[1] / 'server.py')
 app = importlib.util.module_from_spec(spec)
@@ -46,6 +50,51 @@ class Client:
         return headers
 
 class WorkflowTests(unittest.TestCase):
+    def test_execution_pdf_approval_access_and_original_appendix(self):
+        original=BytesIO()
+        sheet=canvas.Canvas(original)
+        sheet.drawString(50,750,'ORIGINAL SI TEST DOCUMENT')
+        sheet.showPage();sheet.save()
+        upload={'name':'si-original.pdf','base64':base64.b64encode(original.getvalue()).decode()}
+        payload={'cif':'1234567','kind':'Standing Instruction','nominal':250000000,'description':'Pembayaran vendor','file':upload}
+        status,result,_=self.maker.call('/documents',payload)
+        self.assertEqual(status,201)
+        doc=result['id'];route='/documents/'+doc+'/execution-pdf'
+        self.assertEqual(self.maker.call(route)[0],409)
+        self.assertEqual(Client(self.url).call(route)[0],401)
+        self.respond(self.token(doc))
+        self.assertEqual(self.sol.call(route)[0],409)
+        self.assertEqual(self.sol.call('/documents/'+doc+'/review',{'version':1,'decision':'approved','notes':'Surat telah diperiksa.'})[0],200)
+        status,body,headers=self.maker.call(route)
+        self.assertEqual(status,200)
+        self.assertEqual(headers['Content-Type'],'application/pdf')
+        reader=PdfReader(BytesIO(body))
+        text='\n'.join(page.extract_text() for page in reader.pages)
+        for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','SOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
+            self.assertIn(expected,text)
+        self.assertEqual(reader.attachments['si-original.pdf'][0],original.getvalue())
+        self.assertNotIn(self.token(doc),text)
+        self.assertEqual(self.sol.call(route)[0],200)
+        app.create_user('observer@example.test','BOH','boh','ObserverTest!2026')
+        boh=Client(self.url);boh.call('/login',{'email':'observer@example.test','password':'ObserverTest!2026'})
+        self.assertEqual(boh.call(route)[0],403)
+        app.create_user('other@example.test','Other Maker','petugas','OtherMaker!2026')
+        other=Client(self.url);other.call('/login',{'email':'other@example.test','password':'OtherMaker!2026'})
+        self.assertEqual(other.call(route)[0],403)
+        self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})
+        self.assertEqual(self.sol.call(route)[0],404)
+
+    def test_execution_pdf_images_and_unreadable_original(self):
+        image=BytesIO();Image.new('RGB',(800,1200),'white').save(image,format='PNG')
+        payload={'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':{'name':'si.png','base64':base64.b64encode(image.getvalue()).decode()}}
+        doc=self.maker.call('/documents',payload)[1]['id']
+        self.respond(self.token(doc));self.sol.call('/documents/'+doc+'/review',{'version':1,'decision':'approved','notes':''})
+        status,body,_=self.sol.call('/documents/'+doc+'/execution-pdf')
+        self.assertEqual(status,200)
+        self.assertEqual(PdfReader(BytesIO(body)).attachments['si.png'][0],image.getvalue())
+        malformed=self.create();self.respond(self.token(malformed));self.sol.call('/documents/'+malformed+'/review',{'version':1,'decision':'approved','notes':''})
+        self.assertEqual(self.sol.call('/documents/'+malformed+'/execution-pdf')[0],422)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         app.DB_PATH=Path(self.temp.name)/'bpip.sqlite3'
@@ -312,6 +361,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('<script>',html_body)
         self.assertIn('&lt;script&gt;',html_body)
         self.assertNotIn('DKIM-Signature',message)
+        self.assertIn('BRI VISTA',html_body)
+        self.assertIn('Verification, Integration &amp; Secure Tracking Application',html_body)
+        self.assertNotIn('(v1)',row['subject'])
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':''}):
             with self.assertRaises(app.AppError):app.build_confirmation_email(row)
     def test_login_limits_headers_password_and_logout(self):

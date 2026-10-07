@@ -1,4 +1,4 @@
-"""BPIP: dependency-free HTTP application, SQLite persistence and SMTP outbox.
+"""BPIP: HTTP application, SQLite persistence and SMTP outbox.
 
 Run `python3 server.py --demo` locally, or `python3 server.py init` to create users.
 """
@@ -28,6 +28,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+from execution_report import build_execution_report, ReportError
 
 ROOT = Path(__file__).resolve().parent
 for line in (ROOT / '.env').read_text().splitlines() if (ROOT / '.env').exists() else []:
@@ -39,7 +40,11 @@ PRODUCTION = os.getenv('APP_ENV', 'development') == 'production'
 DB_PATH = Path(os.getenv('DATABASE_PATH', str(ROOT / 'data/bpip.sqlite3')))
 BASE_URL = (os.getenv('PUBLIC_BASE_URL') or os.getenv('RENDER_EXTERNAL_URL') or 'http://localhost:8000').rstrip('/')
 MAIL_MODE = os.getenv('MAIL_MODE', 'console')
-BANK_NAME = os.getenv('BANK_NAME', 'BPIP Document Confirmation')
+APP_NAME = 'BRI VISTA'
+APP_TAGLINE = 'Verification, Integration & Secure Tracking Application'
+BANK_NAME = os.getenv('BANK_NAME', APP_NAME)
+if BANK_NAME in ('BPIP', 'BPIP Document Confirmation'):
+    BANK_NAME = APP_NAME
 MAX_FILE = 5 * 1024 * 1024
 MAX_BODY = 8 * 1024 * 1024
 SESSION_TTL = 8 * 3600
@@ -202,13 +207,13 @@ def enqueue(db, doc, upload, actor, ip, agent):
     expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
     db.execute('INSERT INTO versions VALUES(?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp))
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
-    subject = f"BPIP: Konfirmasi {doc['kind']} - {doc['id']} (v{doc['version']})"
+    subject = f"BRI VISTA: Konfirmasi {doc['kind']} - {doc['id']}"
     body = f"""Yth. {doc['person']},
 
 Mohon konfirmasi Anda atas surat transaksi berikut. Silakan tinjau surat dan pastikan data pengajuan sudah sesuai sebelum memberikan keputusan.
 
 Nasabah: {doc['customer_name']}
-Nomor pengajuan: {doc['id']} (versi {doc['version']})
+Nomor pengajuan: {doc['id']}
 Jenis dokumen: {doc['kind']}
 Nominal transaksi: {amount}
 
@@ -219,12 +224,13 @@ Pilih Setujui jika surat dan data pengajuan sudah sesuai. Jika terdapat ketidaks
 
 Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam sejak pengajuan dikirim dan hanya dapat digunakan untuk satu keputusan. Membuka tautan tidak berarti Anda memberikan persetujuan. Mohon tidak membagikan tautan ini kepada pihak lain.
 
-Jika Anda tidak mengenali pengajuan ini atau memerlukan bantuan, hubungi petugas melalui kontak yang biasa Anda gunakan. BPIP tidak meminta kata sandi, PIN, atau OTP melalui email.
+Jika Anda tidak mengenali pengajuan ini atau memerlukan bantuan, hubungi petugas melalui kontak yang biasa Anda gunakan. BRI VISTA tidak meminta kata sandi, PIN, atau OTP melalui email.
 
 Terima kasih atas perhatian dan konfirmasi Anda.
 
 Hormat kami,
-{BANK_NAME}
+{APP_NAME}
+{APP_TAGLINE}
 """
     db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'queued', stamp))
     add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Email: {doc['email']} · {amount}", ip, agent)
@@ -272,7 +278,7 @@ def build_confirmation_email(row):
     # Gmail SMTP must use the authenticated mailbox, rather than impersonate an alias.
     if os.getenv('SMTP_HOST', '').strip().lower() == 'smtp.gmail.com':
         sender = valid_email(os.getenv('SMTP_USER', ''))
-    name = name or 'BPIP - Konfirmasi Dokumen'
+    name = 'BRI VISTA - Konfirmasi Dokumen' if not name or name.startswith('BPIP') else name
     message = EmailMessage(policy=SMTP)
     message['Subject'] = row['subject']
     message['From'] = formataddr((name, sender))
@@ -289,7 +295,7 @@ def build_confirmation_email(row):
         for line in paragraph.splitlines():
             if line.startswith(BASE_URL+'/#confirm/') and re.fullmatch(r'[A-Za-z0-9_-]+',line[len(BASE_URL+'/#confirm/'):]):
                 url=html.escape(line,quote=True)
-                lines.append(f'<a href="{url}" style="display:inline-block;background:#0857c3;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none">Tinjau surat dan konfirmasi</a>')
+                lines.append(f'<a href="{url}" style="display:block;background:#0857c3;color:#fff;padding:16px 20px;border-radius:8px;text-decoration:none;text-align:center;font-weight:700">Tinjau surat dan konfirmasi</a>')
             else:
                 lines.append(html.escape(line))
         if paragraph.startswith('Nasabah: ') and all(': ' in line for line in paragraph.splitlines()):
@@ -297,10 +303,14 @@ def build_confirmation_email(row):
             for line in paragraph.splitlines():
                 label,value=line.split(': ',1)
                 rows.append('<tr><td style="padding:8px 12px;vertical-align:top;color:#5b7188;width:36%">'+html.escape(label)+'</td><td style="padding:8px 12px;vertical-align:top;font-weight:600;overflow-wrap:anywhere">'+html.escape(value)+'</td></tr>')
-            paragraphs.append('<table role="presentation" style="border-collapse:collapse;width:100%;margin:0 0 24px;background:#f3f7fd;border:1px solid #dce6f3;font-size:14px">'+''.join(rows)+'</table>')
+            rows.append('<tr><td style="padding:12px;color:#5b7188">Status</td><td style="padding:12px"><span style="display:inline-block;padding:6px 10px;background:#fff5df;border-radius:16px;color:#946200;font-weight:600">Menunggu konfirmasi</span></td></tr>')
+            paragraphs.append('<table role="presentation" style="border-collapse:collapse;width:100%;margin:0 0 24px;border:1px solid #dce6f3;font-size:14px"><tr><td colspan="2" style="background:#edf6fd;color:#0857c3;padding:16px 12px;font-weight:700;font-size:17px">Ringkasan dokumen</td></tr>'+''.join(rows)+'</table>')
+        elif paragraph.startswith('Tautan berlaku '):
+            paragraphs.append('<table role="presentation" width="100%" style="margin:0 0 20px;background:#edf6fd;border-radius:8px"><tr><td style="padding:18px;color:#3c3c3c;line-height:1.7"><strong style="display:block;color:#0857c3;font-size:16px;margin-bottom:8px">Informasi keamanan</strong>'+'<br>'.join(lines)+'</td></tr></table>')
         else:
             paragraphs.append('<p style="margin:0 0 20px;line-height:1.7">'+'<br>'.join(lines)+'</p>')
-    message.add_alternative('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Konfirmasi dokumen BPIP</title></head><body style="margin:0;background:#f3f7fd;font-family:Arial,sans-serif;color:#3c3c3c"><main style="max-width:640px;margin:24px auto;padding:28px;background:#fff;border:1px solid #dce6f3"><p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:1px;color:#0857c3">BPIP · KONFIRMASI DOKUMEN</p><h1 style="margin:0 0 24px;color:#3c3c3c;font-size:22px">Konfirmasi surat transaksi</h1>'+''.join(paragraphs)+'</main></body></html>',subtype='html')
+    email_html = '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Konfirmasi dokumen BRI VISTA</title></head><body style="margin:0;padding:0;background:#f3f7fd;font-family:Arial,sans-serif;font-size:14px;color:#3c3c3c"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px"><tr><td style="background:#fff;border-bottom:5px solid #0857c3;border-radius:10px;padding:22px 26px;color:#0857c3"><strong style="font-size:26px">BRI VISTA</strong><span style="display:block;font-size:12px;margin-top:4px;color:#5b7188">Verification, Integration &amp; Secure Tracking Application</span></td></tr><tr><td style="height:16px"></td></tr><tr><td style="background:#fff;border:1px solid #dce6f3;border-radius:10px;padding:26px"><h1 style="margin:0 0 26px;color:#0857c3;font-size:25px;line-height:1.35">Konfirmasi surat transaksi</h1>'+''.join(paragraphs)+'<p style="padding-top:20px;border-top:1px solid #dce6f3;text-align:center;font-size:12px;color:#5b7188;margin:0">BRI VISTA<br>Verification, Integration &amp; Secure Tracking Application</p></td></tr></table></td></tr></table></body></html>'
+    message.add_alternative(email_html, subtype='html')
     return message, sender
 
 def deliver_one():
@@ -339,7 +349,7 @@ def deliver_one():
             status, action = 'sent', 'Email diterima server SMTP'
         with database(True) as db:
             db.execute('UPDATE outbox SET status=?,sent_at=?,error=? WHERE id=?', (status, now(), '', row['id']))
-            add_audit(db, doc, action, 'Sistem', f"Versi email {row['version']}")
+            add_audit(db, doc, action, 'Sistem', 'Pengiriman email konfirmasi')
     except Exception:
         logging.exception('Pengiriman email gagal; id=%s', row['id'])
         attempts = row['attempts'] + 1
@@ -456,6 +466,25 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         rows=db.execute('SELECT d.id,d.customer_name AS name,a.archived_at FROM documents d JOIN archived_documents a ON a.doc_id=d.id ORDER BY a.archived_at DESC')
                     return self.respond({'items':[dict(r) for r in rows]})
+                report = re.fullmatch(r'/api/documents/([^/]+)/execution-pdf', path)
+                if report:
+                    doc = owned_document(db, report[1], user)
+                    require(doc['sol_status']=='approved' and doc['customer_status']=='confirmed', 'PDF tersedia setelah nasabah dan SOL menyetujui pengajuan.', 409)
+                    version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'],doc['version'])).fetchone()
+                    audit = [dict(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id', (doc['id'],))]
+                    maker = db.execute('SELECT name FROM users WHERE id=?', (doc['maker'],)).fetchone()
+                    try:
+                        content = build_execution_report(dict(doc), dict(version), audit, maker['name'] if maker else 'Tidak tercatat')
+                    except ReportError as err:
+                        raise AppError(422, str(err))
+                    self.send_response(200)
+                    self.headers_common()
+                    self.send_header('Content-Type','application/pdf')
+                    self.send_header('Content-Disposition','attachment; filename="konfirmasi-pelaksanaan-'+doc['id']+'.pdf"')
+                    self.send_header('Content-Length',str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
                 historic = re.fullmatch(r'/api/documents/([^/]+)/versions/([0-9]+)/file', path)
                 if historic:
                     doc = owned_document(db, historic[1], user)
@@ -491,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.headers_common()
         self.send_header('Content-Type', version['mime'])
-        self.send_header('Content-Disposition', 'attachment; filename="surat-v' + str(version['version']) + ('.pdf' if version['mime'] == 'application/pdf' else '.png' if version['mime'] == 'image/png' else '.jpg') + '"')
+        self.send_header('Content-Disposition', 'attachment; filename="surat' + ('.pdf' if version['mime'] == 'application/pdf' else '.png' if version['mime'] == 'image/png' else '.jpg') + '"')
         self.send_header('Content-Length', str(len(version['content'])))
         self.end_headers()
         self.wfile.write(version['content'])

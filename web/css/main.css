@@ -50,3 +50,7 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 
 /* Compact KPI row on desktop, readable groups on smaller screens. */
 .stats .stat{padding:18px 16px}.stats .stat-label{min-height:52px;gap:7px;font-size:12px;line-height:1.45}.stats .stat-value{font-size:30px;margin:12px 0}.stats .stat-foot{font-size:10px;line-height:1.6;min-height:48px}@media(max-width:1099px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stats .stat{padding:16px}.stats .stat-foot{font-size:11px}}
+
+.execution-output{display:flex;justify-content:space-between;align-items:center;gap:20px;background:#f0f6ff;border-color:#cbdff7}.execution-output h2{color:#0857c3}.execution-output p{font-size:12px;margin-top:6px}@media(max-width:760px){.execution-output{align-items:stretch;flex-direction:column}.execution-output .btn{white-space:normal}}
+
+.brand strong{font-size:17px;letter-spacing:.5px}.brand small{font-size:8px;letter-spacing:.1px;line-height:1.5;max-width:155px}.workspace-footer{flex-wrap:wrap}.workspace-footer>span:first-child{max-width:100%;overflow-wrap:anywhere}

@@ -1,11 +1,14 @@
-# BPIP — Document Confirmation
+# BRI VISTA
 
-Aplikasi web untuk pengajuan petugas, konfirmasi surat melalui email, dan keputusan SOL. Backend Python + SQLite; frontend HTML/CSS/JavaScript. Python 3.10+; mode lokal tidak memerlukan npm atau dependency Python tambahan. Deployment menggunakan Gunicorn melalui `requirements.txt`; lihat `DEPLOY.md`.
+Verification, Integration & Secure Tracking Application
+
+Aplikasi web untuk pengajuan petugas, konfirmasi surat melalui email, dan keputusan SOL. Backend Python + SQLite; frontend HTML/CSS/JavaScript. Python 3.10+; mode lokal tidak memerlukan npm. Ekspor PDF menggunakan ReportLab dan pypdf. Deployment menggunakan Gunicorn melalui `requirements.txt`; lihat `DEPLOY.md`.
 
 ## Jalankan dan coba
 
 ```sh
 cd /Users/kznrifky/Documents/BPIP
+python3 -m pip install -r requirements.txt
 python3 server.py --demo
 ```
 
@@ -111,3 +114,9 @@ Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun B
 ### Pengiriman email dan Inbox
 
 Email konfirmasi menyertakan Date, Message-ID, identitas pengirim, Reply-To, serta versi teks dan HTML yang berisi informasi yang sama. Saat memakai smtp.gmail.com, alamat From dan envelope sender menggunakan SMTP_USER agar sesuai dengan akun Gmail yang diautentikasi; SMTP_FROM tidak dapat menyamar sebagai alamat lain. Gmail/penyedia email tetap menentukan penempatan Inbox atau Spam. Format email tidak menggantikan SPF, DKIM, DMARC atau reputasi pengirim. Untuk Gmail pribadi, autentikasi domain gmail.com dikelola Google; untuk domain sendiri, konfigurasikan DNS melalui penyedia domain/email. Periksa Authentication-Results pada email yang diterima, bukan hanya status sent pada aplikasi.
+
+## PDF pelaksanaan setelah persetujuan
+
+Buka detail pengajuan yang telah disetujui nasabah dan SOL, lalu pilih **Unduh PDF pelaksanaan**. Petugas pembuat dan SOL dapat mengunduh; BOH tetap hanya memantau dashboard. PDF memuat surat konfirmasi pelaksanaan, identitas pembuat, pernyataan serta waktu konfirmasi nasabah, persetujuan SOL, log aktivitas, dan surat terakhir yang disetujui. File asli disertakan sebagai lampiran PDF dan hash SHA-256 dicantumkan. PDF/JPG/PNG didukung. PDF rusak atau dilindungi kata sandi menghasilkan pesan kesalahan, bukan laporan tanpa dokumen asli.
+
+Surat ini merupakan bukti selesainya alur persetujuan, bukan bukti eksekusi transaksi atau tanda tangan digital tersertifikasi. Tidak ada penanda versi yang ditampilkan; snapshot revisi tetap disimpan secara internal.
