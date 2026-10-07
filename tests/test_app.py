@@ -293,6 +293,27 @@ class WorkflowTests(unittest.TestCase):
             app.deliver_one()
         self.assertEqual(self.maker.call('/documents/'+doc_id)[1]['document']['mail']['status'],'failed')
         self.assertEqual(self.maker.call('/outbox')[0],404) # Token previews absent in SMTP mode.
+    def test_confirmation_email_format_sender_and_escaped_html(self):
+        doc_id=self.create()
+        with app.database() as db:
+            row=dict(db.execute('SELECT * FROM outbox WHERE doc_id=?',(doc_id,)).fetchone())
+        row['body']='Yth. <script>alert(1)</script>,\n\n'+app.BASE_URL+'/#confirm/test_token\n\nJangan bagikan tautan ini.'
+        with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':'sender@gmail.com','SMTP_FROM':'BPIP <other@example.com>'}):
+            message,sender=app.build_confirmation_email(row)
+        self.assertEqual(sender,'sender@gmail.com')
+        self.assertEqual(app.parseaddr(message['From'])[1],sender)
+        self.assertEqual(app.parseaddr(message['Reply-To'])[1],sender)
+        self.assertIsNotNone(message['Date'])
+        self.assertEqual(message['Message-ID'],f"<{row['id']}@gmail.com>")
+        self.assertEqual(message.get_content_type(),'multipart/alternative')
+        self.assertEqual(message.get_body(preferencelist=('plain',)).get_content(),row['body']+'\n')
+        html_body=message.get_body(preferencelist=('html',)).get_content()
+        self.assertIn('href="'+app.BASE_URL+'/#confirm/test_token"',html_body)
+        self.assertNotIn('<script>',html_body)
+        self.assertIn('&lt;script&gt;',html_body)
+        self.assertNotIn('DKIM-Signature',message)
+        with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':''}):
+            with self.assertRaises(app.AppError):app.build_confirmation_email(row)
     def test_login_limits_headers_password_and_logout(self):
         headers=self.maker.login('petugas')
         self.assertIn('HttpOnly',headers['Set-Cookie'])

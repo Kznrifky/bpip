@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import html
 import mimetypes
 import os
 import re
@@ -21,6 +22,8 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from email.policy import SMTP
+from email.utils import formataddr, formatdate, parseaddr
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -199,10 +202,10 @@ def enqueue(db, doc, upload, actor, ip, agent):
     expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
     db.execute('INSERT INTO versions VALUES(?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp))
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
-    subject = f"Konfirmasi {doc['kind']} • {doc['id']} • Versi {doc['version']}"
+    subject = f"BPIP: Konfirmasi {doc['kind']} - {doc['id']} (v{doc['version']})"
     body = f"""Yth. {doc['person']},
 
-Mohon periksa dan konfirmasikan surat berikut:
+Anda menerima email ini karena alamat Anda terdaftar sebagai penerima konfirmasi untuk pengajuan berikut. Mohon periksa surat dan detail transaksi sebelum memberikan keputusan:
 Nasabah: {doc['customer_name']}
 Dokumen: {doc['id']} (versi {doc['version']})
 Jenis: {doc['kind']}
@@ -213,7 +216,9 @@ Buka halaman konfirmasi untuk melihat surat, lalu pilih Setujui atau Tolak:
 
 Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam dan hanya menerima satu keputusan. Membuka email atau tautan tidak memberikan persetujuan otomatis. Jangan teruskan tautan ini kepada pihak lain.
 
-Jika detail tidak sesuai, pilih Tolak dan tuliskan alasan Anda. Persetujuan nasabah akan diperiksa kembali oleh SOL sebelum pengajuan disetujui.
+Jika detail tidak sesuai, pilih Tolak dan tuliskan alasan Anda. Setelah Anda memberikan konfirmasi, SOL akan memeriksa pengajuan.
+
+BPIP tidak meminta kata sandi, PIN, atau kode OTP melalui email ini. Jika Anda tidak mengenali pengajuan tersebut, hubungi petugas melalui kontak yang sudah Anda kenal.
 
 {BANK_NAME}
 """
@@ -256,6 +261,38 @@ def portal_document(db, token):
     require(doc['customer_status'] == 'pending', 'Pengajuan ini tidak lagi menerima konfirmasi.', 409)
     return doc, version
 
+def build_confirmation_email(row):
+    """Accurate sender identity and RFC-compliant transactional message."""
+    configured = os.getenv('SMTP_FROM') or os.getenv('SMTP_USER') or 'BPIP <noreply@localhost>'
+    name, sender = parseaddr(configured)
+    # Gmail SMTP must use the authenticated mailbox, rather than impersonate an alias.
+    if os.getenv('SMTP_HOST', '').strip().lower() == 'smtp.gmail.com':
+        sender = valid_email(os.getenv('SMTP_USER', ''))
+    name = name or 'BPIP - Konfirmasi Dokumen'
+    message = EmailMessage(policy=SMTP)
+    message['Subject'] = row['subject']
+    message['From'] = formataddr((name, sender))
+    message['To'] = row['recipient']
+    message['Reply-To'] = formataddr((name, sender))
+    message['Date'] = formatdate(usegmt=True)
+    message['Message-ID'] = f"<{row['id']}@{sender.rsplit('@',1)[-1]}>"
+    message['Auto-Submitted'] = 'auto-generated'
+    message.set_content(row['body'])
+    # HTML mirrors the plain text; only the actual BPIP confirmation link is clickable.
+    paragraphs=[]
+    for paragraph in row['body'].strip().split('\n\n'):
+        lines=[]
+        for line in paragraph.splitlines():
+            if line.startswith(BASE_URL+'/#confirm/') and re.fullmatch(r'[A-Za-z0-9_-]+',line[len(BASE_URL+'/#confirm/'):]):
+                url=html.escape(line,quote=True)
+                host=html.escape(urlsplit(BASE_URL).netloc)
+                lines.append(f'<a href="{url}" style="display:inline-block;background:#0857c3;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none">Periksa surat dan beri konfirmasi</a><br><span style="font-size:12px;color:#526980">Halaman konfirmasi: {host}</span>')
+            else:
+                lines.append(html.escape(line))
+        paragraphs.append('<p style="margin:0 0 20px;line-height:1.7">'+'<br>'.join(lines)+'</p>')
+    message.add_alternative('<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Konfirmasi dokumen BPIP</title></head><body style="margin:0;background:#f3f7fd;font-family:Arial,sans-serif;color:#3c3c3c"><main style="max-width:640px;margin:24px auto;padding:28px;background:#fff;border:1px solid #dce6f3"><h1 style="margin:0 0 24px;color:#0857c3;font-size:22px">Konfirmasi dokumen BPIP</h1>'+''.join(paragraphs)+'</main></body></html>',subtype='html')
+    return message, sender
+
 def deliver_one():
     """Single worker. Stale leases retry after restart; SMTP is at-least-once."""
     with database(True) as db:
@@ -268,13 +305,8 @@ def deliver_one():
             db.execute("UPDATE outbox SET status='cancelled' WHERE id=?", (row['id'],))
             return True
         db.execute("UPDATE outbox SET status='sending', attempts=attempts+1, next_attempt=? WHERE id=?", (time.time() + 120, row['id']))
-    message = EmailMessage()
-    message['Subject'] = row['subject']
-    message['From'] = os.getenv('SMTP_FROM') or os.getenv('SMTP_USER') or 'BPIP <noreply@localhost>'
-    message['To'] = row['recipient']
-    message['Message-ID'] = f"<{row['id']}@{urlsplit(BASE_URL).hostname or 'localhost'}>"
-    message.set_content(row['body'])
     try:
+        message, sender = build_confirmation_email(row)
         if MAIL_MODE == 'console':
             folder = DB_PATH.parent / 'outbox'
             folder.mkdir(exist_ok=True, mode=0o700)
@@ -293,7 +325,7 @@ def deliver_one():
                     client.starttls(context=ssl.create_default_context())
                 if os.getenv('SMTP_USER'):
                     client.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])
-                client.send_message(message)
+                client.send_message(message, from_addr=sender, to_addrs=[row['recipient']])
             status, action = 'sent', 'Email diterima server SMTP'
         with database(True) as db:
             db.execute('UPDATE outbox SET status=?,sent_at=?,error=? WHERE id=?', (status, now(), '', row['id']))
