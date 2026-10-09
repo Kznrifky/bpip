@@ -652,7 +652,7 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute('DELETE FROM archived_customers')
                 db.commit()
                 return self.respond({'ok':True,'count':count})
-            if path == '/api/customers/archive-selected':
+            if path == '/api/customers/delete-selected':
                 require(user['role']=='sol', 'Hanya SOL yang dapat menghapus nasabah.', 403)
                 verify_action_password(db,user,data)
                 cifs = data.get('cifs')
@@ -661,10 +661,10 @@ class Handler(BaseHTTPRequestHandler):
                 for cif in cifs:
                     require(db.execute('SELECT 1 FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)',(cif,)).fetchone(), 'Data nasabah berubah. Muat ulang dan pilih kembali.',409)
                 for cif in cifs:
-                    db.execute('INSERT INTO archived_customers VALUES(?,?,?)',(cif,now(),user['id']))
-                    management_audit(db,'customers/'+cif,'archive',user)
+                    db.execute('DELETE FROM customers WHERE cif=?',(cif,))
+                    management_audit(db,'customers/'+cif,'delete',user)
                 db.commit()
-                return self.respond({'ok':True,'archived_count':len(cifs)})
+                return self.respond({'ok':True,'deleted_count':len(cifs)})
             customer_archive=re.fullmatch(r'/api/customers/([0-9]{3,30})/archive',path)
             if customer_archive:
                 require(user['role']=='sol', 'Hanya SOL yang dapat menghapus nasabah.', 403)

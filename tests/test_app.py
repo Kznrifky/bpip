@@ -269,19 +269,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.maker.call('/customers/restore-all',{})[0],403)
         self.assertEqual(self.sol.call('/customers/restore-all',{})[0],200)
         self.assertTrue(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
-    def test_selected_customers_archive_atomically_and_restore(self):
+    def test_selected_customers_delete_master_and_preserve_history(self):
         doc_id=self.create()
         payload={'cifs':['1234567','9876543'],'password':'SolDemo!2026'}
-        self.assertEqual(self.maker.call('/customers/archive-selected',payload)[0],403)
-        self.assertEqual(self.sol.call('/customers/archive-selected',{**payload,'password':'wrong'})[0],403)
-        self.assertEqual(self.sol.call('/customers/archive-selected',{**payload,'cifs':['1234567','999999']})[0],409)
+        self.assertEqual(self.maker.call('/customers/delete-selected',payload)[0],403)
+        self.assertEqual(self.sol.call('/customers/delete-selected',{**payload,'password':'wrong'})[0],403)
+        self.assertEqual(self.sol.call('/customers/delete-selected',{**payload,'cifs':['1234567','999999']})[0],409)
         self.assertEqual(len(self.sol.call('/customers')[1]['customers']),3)
-        self.assertEqual(self.sol.call('/customers/archive-selected',{**payload,'cifs':['1234567','1234567']})[0],400)
-        self.assertEqual(self.sol.call('/customers/archive-selected',payload)[0],200)
+        self.assertEqual(self.sol.call('/customers/delete-selected',{**payload,'cifs':['1234567','1234567']})[0],400)
+        self.assertEqual(self.sol.call('/customers/delete-selected',payload)[0],200)
         self.assertEqual([c['cif'] for c in self.sol.call('/customers')[1]['customers']],['5551234'])
         self.assertEqual(self.maker.call('/documents/'+doc_id)[0],200)
+        with app.database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM customers WHERE cif IN (?,?)',tuple(payload['cifs'])).fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0],0)
         self.assertEqual(self.sol.call('/customers/restore-all',{})[0],200)
-        self.assertEqual(len(self.sol.call('/customers')[1]['customers']),3)
+        self.assertEqual(len(self.sol.call('/customers')[1]['customers']),1)
+        document=self.maker.call('/documents/'+doc_id)[1]['document']
+        self.assertEqual(document['customer_name'],'PT Maju Bersama')
+        self.assertEqual(document['account'],'001234567890')
+        self.assertEqual(self.respond(self.token(doc_id))[0],200)
     def test_single_archive_does_not_hide_other_documents(self):
         first=self.create();second=self.create()
         self.assertEqual(self.sol.call('/documents/'+first+'/archive',{'version':2,'password':'SolDemo!2026'})[0],409)
