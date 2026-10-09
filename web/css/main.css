@@ -161,3 +161,6 @@ body { min-width: 320px; }
   .stats { gap: 12px; }
   .form-grid { gap: 20px; }
 }
+
+/* The submission form fills the space freed by the removed guidance panel. */
+.form-layout { grid-template-columns: minmax(0, 1fr); }
