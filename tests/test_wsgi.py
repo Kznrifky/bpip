@@ -37,6 +37,7 @@ class WSGITransportTests(unittest.TestCase):
         cookie = response['headers']['Set-Cookie'].split(';')[0]
         self.assertEqual(self.request('/api/session', cookie=cookie)['status'], 200)
         payload = {'cif':'1234567','kind':'Warkat','nominal':10000,'file':{'name':'surat.pdf','base64':base64.b64encode(b'%PDF-1.4\n%%EOF').decode()}}
+        payload.update(destination_account='000123456789012', destination_name='PT Tujuan Pembayaran')
         self.assertEqual(self.request('/api/documents',payload,cookie)['status'],403)
         response = self.request('/api/documents',payload,cookie,csrf)
         self.assertEqual(response['status'],201)

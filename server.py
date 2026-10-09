@@ -62,10 +62,12 @@ CREATE TABLE IF NOT EXISTS password_attempts(user_id TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS documents(
  id TEXT PRIMARY KEY, cif TEXT, customer_name TEXT, account TEXT, person TEXT, email TEXT,
  kind TEXT, nominal INTEGER, description TEXT, maker TEXT, version INTEGER,
- customer_status TEXT, sol_status TEXT, sol_notes TEXT DEFAULT '', created TEXT, updated TEXT);
+ customer_status TEXT, sol_status TEXT, sol_notes TEXT DEFAULT '', created TEXT, updated TEXT,
+ destination_account TEXT NOT NULL DEFAULT '', destination_name TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS versions(
  doc_id TEXT, version INTEGER, filename TEXT, mime TEXT, content BLOB, sha256 TEXT,
  nominal INTEGER, token_hash TEXT UNIQUE, expires REAL, used_at TEXT, created TEXT,
+ destination_account TEXT NOT NULL DEFAULT '', destination_name TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(doc_id,version));
 CREATE TABLE IF NOT EXISTS audit(
  id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT, version INTEGER, action TEXT,
@@ -112,6 +114,11 @@ def initialize():
         db.execute('BEGIN IMMEDIATE')
         if 'phone' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
             db.execute("ALTER TABLE customers ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+        for table in ('documents', 'versions'):
+            columns = {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
+            for column in ('destination_account', 'destination_name'):
+                if column not in columns:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
     os.chmod(DB_PATH, 0o600)
 
 def create_user(email, name, role, password):
@@ -204,7 +211,11 @@ def transaction_fields(data):
     nominal = data.get('nominal')
     require(kind in ('Standing Instruction', 'Warkat'), 'Jenis dokumen tidak valid.')
     require(type(nominal) is int and 0 < nominal <= 999999999999999, 'Masukkan nominal lebih dari Rp0, tanpa desimal. Maksimal Rp999.999.999.999.999.')
-    return kind, nominal, text_field(data, 'description', 1500, False)
+    destination_account = data.get('destination_account')
+    require(isinstance(destination_account, str) and bool(re.fullmatch(r'[0-9]{1,30}', destination_account.strip())), 'Rekening tujuan wajib diisi dengan angka, maksimal 30 digit.')
+    destination_name = data.get('destination_name')
+    require(isinstance(destination_name, str) and 0 < len(destination_name.strip()) <= 250, 'Atas nama rekening tujuan wajib diisi, maksimal 250 karakter.')
+    return kind, nominal, text_field(data, 'description', 1500, False), destination_account.strip(), destination_name.strip()
 
 def add_audit(db, doc, action, actor, notes='', ip='', agent=''):
     db.execute('INSERT INTO audit(doc_id,version,action,actor,notes,at,ip,agent) VALUES(?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], action, actor, notes, now(), ip, agent[:300]))
@@ -213,7 +224,7 @@ def enqueue(db, doc, upload, actor, ip, agent):
     token = secrets.token_urlsafe(32)
     stamp = now()
     expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
-    db.execute('INSERT INTO versions VALUES(?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp))
+    db.execute('INSERT INTO versions(doc_id,version,filename,mime,content,sha256,nominal,token_hash,expires,used_at,created,destination_account,destination_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp, doc['destination_account'], doc['destination_name']))
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
     subject = f"BRI VISTA: Konfirmasi {doc['kind']} - {doc['id']}"
     body = f"""Yth. {doc['person']},
@@ -224,6 +235,8 @@ Nasabah: {doc['customer_name']}
 Nomor pengajuan: {doc['id']}
 Jenis dokumen: {doc['kind']}
 Nominal transaksi: {amount}
+Rekening tujuan: {doc['destination_account'] or 'Belum tercatat'}
+Atas nama rekening tujuan: {doc['destination_name'] or 'Belum tercatat'}
 
 Untuk meninjau surat dan memberikan konfirmasi, buka tautan berikut:
 {BASE_URL}/#confirm/{token}
@@ -517,7 +530,7 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_file(version)
                     result = document_summary(db, doc)
                     result['audit'] = [dict(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id DESC', (doc['id'],))]
-                    result['versions'] = [dict(r) for r in db.execute('SELECT version,filename,sha256,nominal,created FROM versions WHERE doc_id=? ORDER BY version DESC', (doc['id'],))]
+                    result['versions'] = [dict(r) for r in db.execute('SELECT version,filename,sha256,nominal,created,destination_account,destination_name FROM versions WHERE doc_id=? ORDER BY version DESC', (doc['id'],))]
                     return self.respond({'document': result})
                 if path == '/api/outbox' and MAIL_MODE == 'console' and not PRODUCTION:
                     rows = db.execute('SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id ORDER BY o.created DESC') if user['role'] == 'sol' else db.execute('SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE d.maker=? ORDER BY o.created DESC', (user['id'],))
@@ -593,7 +606,7 @@ class Handler(BaseHTTPRequestHandler):
                     add_audit(db, doc, 'Nasabah menyetujui surat' if decision == 'confirmed' else 'Nasabah menolak surat', doc['person'] + ' (Nasabah)', notes + f" · Nominal Rp {doc['nominal']:,} · Pernyataan diperiksa dan disetujui", ip, agent)
                     db.commit()
                     return self.respond({'message': 'Keputusan Anda berhasil dicatat.', 'decision': decision})
-                return self.respond({'document': {key: doc[key] for key in ('id', 'customer_name', 'person', 'kind', 'nominal', 'description', 'version', 'created')}, 'file': {'filename': version['filename'], 'mime': version['mime'], 'sha256': version['sha256']}, 'expires': version['expires']})
+                return self.respond({'document': {key: doc[key] for key in ('id', 'customer_name', 'person', 'kind', 'nominal', 'description', 'destination_account', 'destination_name', 'version', 'created')}, 'file': {'filename': version['filename'], 'mime': version['mime'], 'sha256': version['sha256']}, 'expires': version['expires']})
         with database(True) as db:
             user = self.session(db, True)
             if path == '/api/logout':
@@ -717,12 +730,12 @@ class Handler(BaseHTTPRequestHandler):
                 customer = db.execute('SELECT * FROM customers WHERE cif=?', (text_field(data, 'cif', 30),)).fetchone()
                 require(customer is not None, 'Nasabah belum terdaftar.')
                 require(not db.execute('SELECT 1 FROM archived_customers WHERE cif=?',(customer['cif'],)).fetchone(), 'Nasabah telah dihapus. Minta SOL memulihkan data nasabah.',409)
-                kind, nominal, description = transaction_fields(data)
+                kind, nominal, description, destination_account, destination_name = transaction_fields(data)
                 upload = read_file(data)
                 doc_id = ('SI' if kind == 'Standing Instruction' else 'WK') + '-' + datetime.now().strftime('%Y') + '-' + secrets.token_hex(4).upper()
                 stamp = now()
-                values = (doc_id, customer['cif'], customer['name'], customer['account'], customer['person'], customer['email'], kind, nominal, description, user['id'], 1, 'pending', 'pending', '', stamp, stamp)
-                db.execute('INSERT INTO documents VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
+                values = (doc_id, customer['cif'], customer['name'], customer['account'], customer['person'], customer['email'], kind, nominal, description, user['id'], 1, 'pending', 'pending', '', stamp, stamp, destination_account, destination_name)
+                db.execute('INSERT INTO documents(id,cif,customer_name,account,person,email,kind,nominal,description,maker,version,customer_status,sol_status,sol_notes,created,updated,destination_account,destination_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
                 enqueue(db, doc, upload, user['name'], ip, agent)
                 db.commit()
@@ -761,10 +774,10 @@ class Handler(BaseHTTPRequestHandler):
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 if operation == 'revise':
                     require(doc['sol_status'] == 'revision_requested', 'Revisi hanya tersedia setelah diminta oleh SOL.', 409)
-                    kind, nominal, description = transaction_fields(data)
+                    kind, nominal, description, destination_account, destination_name = transaction_fields(data)
                     upload = read_file(data)
                     notes = text_field(data, 'notes', 1500)
-                    db.execute("UPDATE documents SET kind=?,nominal=?,description=?,version=version+1,customer_status='pending',sol_status='pending',sol_notes='',updated=? WHERE id=?", (kind, nominal, description, now(), doc['id']))
+                    db.execute("UPDATE documents SET kind=?,nominal=?,description=?,destination_account=?,destination_name=?,version=version+1,customer_status='pending',sol_status='pending',sol_notes='',updated=? WHERE id=?", (kind, nominal, description, destination_account, destination_name, now(), doc['id']))
                 else:
                     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Email baru hanya dapat dikirim saat menunggu nasabah.', 409)
                     previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()

@@ -18,7 +18,7 @@ Akun lokal petugas: `petugas@bpip.local`, password `PetugasDemo!2026`.
 Akun lokal SOL: `sol@bpip.local`, password `SolDemo!2026`.
 
 1. Masuk sebagai petugas. Buka Pengajuan baru.
-2. Pilih CIF `1234567`, masukkan nominal `250000000`, dan unggah `docs/surat-demo.pdf`.
+2. Pilih CIF `1234567`, masukkan nominal `250000000`, rekening tujuan `000123456789012`, atas nama `PT Tujuan Pembayaran`, dan unggah `docs/surat-demo.pdf`.
 3. Centang pernyataan pemeriksaan lalu kirim konfirmasi.
 4. Buka Kotak email lokal. Buka halaman konfirmasi nasabah di tab baru.
 5. Periksa surat; centang pernyataan dan pilih Setujui/Tolak. Penolakan memerlukan alasan.
@@ -97,7 +97,9 @@ python3 -m unittest discover -s tests -v
 node --check web/js/app.js
 ```
 
-Tes menggunakan server HTTP sementara dan database terpisah. Mencakup alur revisi/approval, penolakan nasabah, RBAC/ownership, CSRF/origin, validasi nominal/file, tautan kedaluwarsa dan pembatalan token, dua keputusan bersamaan, persistensi, outbox lokal, SMTP dengan mock, retry gagal, password/sesi dan limit login. Tidak mengirim email nyata. Surat contoh yang disediakan hanya untuk pengujian.
+Tes menggunakan server HTTP sementara dan database terpisah. Mencakup alur revisi/approval, penolakan nasabah, RBAC/ownership, CSRF/origin, validasi nominal/file/rekening tujuan, migrasi data lama, tautan kedaluwarsa dan pembatalan token, dua keputusan bersamaan, persistensi, outbox lokal, SMTP dengan mock, retry gagal, password/sesi dan limit login. Tidak mengirim email nyata. Surat contoh yang disediakan hanya untuk pengujian.
+
+Rekening tujuan dan atas nama rekening tujuan wajib diisi untuk setiap pengajuan baru dan revisi, baik Standing Instruction maupun Warkat. Nomor tujuan disimpan sebagai teks agar nol di depan tetap utuh (angka, maksimal 30 digit); nama pemilik maksimal 250 karakter. Keduanya tersimpan pada setiap versi dan ditampilkan pada email, konfirmasi nasabah, detail pengajuan, serta PDF pelaksanaan. Startup menambahkan kolom secara otomatis tanpa menghapus data lama; rekening tujuan pada pengajuan lama yang belum dicatat ditampilkan sebagai “Belum tercatat”.
 
 Nomor rekening untuk nasabah baru harus terdiri dari tepat 15 digit, termasuk nol di depan. Petugas dapat membatalkan pengajuannya sendiri selama belum disetujui atau ditolak SOL, termasuk saat diminta revisi. Alasan wajib dicatat; surat dan audit dipertahankan, tautan nasabah dinonaktifkan, serta email yang belum diproses dibatalkan. Email yang sedang dikirim atau sudah terkirim tidak dapat ditarik kembali.
 

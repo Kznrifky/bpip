@@ -21,6 +21,7 @@ from PIL import Image
 spec = importlib.util.spec_from_file_location('bpip', Path(__file__).resolve().parents[1] / 'server.py')
 app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
+DESTINATION = {'destination_account': '000123456789012', 'destination_name': 'PT Tujuan Pembayaran'}
 FILE = {'name': 'surat.pdf', 'base64': base64.b64encode(b'%PDF-1.4\nSample integration fixture\n%%EOF').decode()}
 
 class Client:
@@ -50,13 +51,71 @@ class Client:
         return headers
 
 class WorkflowTests(unittest.TestCase):
+    def test_destination_required_and_preserved_in_confirmation(self):
+        payload = {'cif': '1234567', 'kind': 'Warkat', 'nominal': 100, 'file': FILE, **DESTINATION}
+        for field in DESTINATION:
+            for invalid in (None, '', '   ', 123):
+                with self.subTest(field=field, value=invalid):
+                    self.assertEqual(self.maker.call('/documents', {**payload, field: invalid})[0], 400)
+            missing = {key: value for key, value in payload.items() if key != field}
+            self.assertEqual(self.maker.call('/documents', missing)[0], 400)
+        for invalid in ('123abc', '1' * 31):
+            self.assertEqual(self.maker.call('/documents', {**payload, 'destination_account': invalid})[0], 400)
+        self.assertEqual(self.maker.call('/documents', {**payload, 'destination_name': 'a' * 251})[0], 400)
+        doc = self.maker.call('/documents', {**payload, 'destination_name': ' PT Tujuan Pembayaran '})[1]['id']
+        detail = self.maker.call('/documents/' + doc)[1]['document']
+        portal = self.customer.call('/portal', {'token': self.token(doc)})[1]['document']
+        for field, expected in DESTINATION.items():
+            self.assertEqual(detail[field], expected)
+            self.assertEqual(portal[field], expected)
+            self.assertEqual(detail['versions'][0][field], expected)
+        with app.database() as db:
+            body = db.execute('SELECT body FROM outbox WHERE doc_id=?', (doc,)).fetchone()['body']
+        self.assertIn(DESTINATION['destination_account'], body)
+        self.assertIn(DESTINATION['destination_name'], body)
+
+    def test_destination_revision_preserves_old_snapshot(self):
+        doc = self.create()
+        old_token = self.token(doc)
+        self.respond(old_token)
+        self.sol.call('/documents/' + doc + '/review', {'version': 1, 'decision': 'revision_requested', 'notes': 'Perbaiki rekening tujuan'})
+        payload = {'version': 1, 'kind': 'Standing Instruction', 'nominal': 250000000, 'notes': 'Rekening tujuan diperbaiki', 'file': FILE, **DESTINATION}
+        self.assertEqual(self.maker.call('/documents/' + doc + '/revise', {**payload, 'destination_name': ''})[0], 400)
+        self.assertEqual(self.maker.call('/documents/' + doc)[1]['document']['version'], 1)
+        changed = {'destination_account': '009876543210000', 'destination_name': 'PT Penerima Baru'}
+        self.assertEqual(self.maker.call('/documents/' + doc + '/revise', {**payload, **changed})[0], 200)
+        self.assertEqual(self.customer.call('/portal', {'token': old_token})[0], 410)
+        detail = self.maker.call('/documents/' + doc)[1]['document']
+        portal = self.customer.call('/portal', {'token': self.token(doc)})[1]['document']
+        for field in DESTINATION:
+            self.assertEqual(detail[field], changed[field])
+            self.assertEqual(portal[field], changed[field])
+            self.assertEqual(detail['versions'][0][field], changed[field])
+            self.assertEqual(detail['versions'][1][field], DESTINATION[field])
+
+    def test_destination_migration_preserves_legacy_records(self):
+        doc = self.create()
+        with app.database(True) as db:
+            for table in ('documents', 'versions'):
+                for column in DESTINATION:
+                    db.execute(f'ALTER TABLE {table} DROP COLUMN {column}')
+        app.initialize()
+        app.initialize()  # Repeated startup must be safe.
+        detail = self.maker.call('/documents/' + doc)[1]['document']
+        self.assertEqual(detail['customer_name'], 'PT Maju Bersama')
+        self.assertEqual(detail['nominal'], 250000000)
+        for field in DESTINATION:
+            self.assertEqual(detail[field], '')
+            self.assertEqual(detail['versions'][0][field], '')
+        self.assertEqual(self.customer.call('/portal', {'token': self.token(doc)})[0], 200)
+
     def test_execution_pdf_approval_access_and_original_appendix(self):
         original=BytesIO()
         sheet=canvas.Canvas(original)
         sheet.drawString(50,750,'ORIGINAL SI TEST DOCUMENT')
         sheet.showPage();sheet.save()
         upload={'name':'si-original.pdf','base64':base64.b64encode(original.getvalue()).decode()}
-        payload={'cif':'1234567','kind':'Standing Instruction','nominal':250000000,'description':'Pembayaran vendor','file':upload}
+        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':250000000,'description':'Pembayaran vendor','file':upload}
         status,result,_=self.maker.call('/documents',payload)
         self.assertEqual(status,201)
         doc=result['id'];route='/documents/'+doc+'/execution-pdf'
@@ -71,7 +130,7 @@ class WorkflowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(body))
         self.assertEqual(len(reader.pages),3)  # Two report pages plus the original, no blank cover.
         text='\n'.join(page.extract_text() for page in reader.pages)
-        for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','SOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
+        for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','SOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
             self.assertIn(expected,text)
         self.assertEqual(reader.attachments['si-original.pdf'][0],original.getvalue())
         self.assertNotIn(self.token(doc),text)
@@ -87,7 +146,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_execution_pdf_images_and_unreadable_original(self):
         image=BytesIO();Image.new('RGB',(800,1200),'white').save(image,format='PNG')
-        payload={'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':{'name':'si.png','base64':base64.b64encode(image.getvalue()).decode()}}
+        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':{'name':'si.png','base64':base64.b64encode(image.getvalue()).decode()}}
         doc=self.maker.call('/documents',payload)[1]['id']
         self.respond(self.token(doc));self.sol.call('/documents/'+doc+'/review',{'version':1,'decision':'approved','notes':''})
         status,body,_=self.sol.call('/documents/'+doc+'/execution-pdf')
@@ -117,7 +176,7 @@ class WorkflowTests(unittest.TestCase):
         self.server.shutdown();self.server.server_close();self.thread.join()
         self.temp.cleanup()
     def create(self, client=None):
-        status,result,_=(client or self.maker).call('/documents',{'cif':'1234567','kind':'Standing Instruction','nominal':250000000,'description':'Pembayaran vendor','file':FILE})
+        status,result,_=(client or self.maker).call('/documents',{**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':250000000,'description':'Pembayaran vendor','file':FILE})
         self.assertEqual(status,201,result)
         return result['id']
     def token(self, doc_id):
@@ -137,7 +196,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.respond(token1)[0],200)
         self.assertEqual(self.respond(token1)[0],410)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki tanggal surat'})[0],200)
-        revision={'version':1,'kind':'Standing Instruction','nominal':260000000,'description':'Nominal diperbaiki','notes':'Tanggal diperbaiki','file':FILE}
+        revision={**DESTINATION,'version':1,'kind':'Standing Instruction','nominal':260000000,'description':'Nominal diperbaiki','notes':'Tanggal diperbaiki','file':FILE}
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',revision)[0],200)
         token2=self.token(doc_id)
         self.assertNotEqual(token1,token2)
@@ -163,7 +222,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':'Nasabah menolak surat'})[0],200)
     def test_roles_csrf_and_ownership(self):
         doc_id=self.create()
-        self.assertEqual(self.sol.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':1,'file':FILE})[0],403)
+        self.assertEqual(self.sol.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Warkat','nominal':1,'file':FILE})[0],403)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved'})[0],403)
         self.assertEqual(self.maker.call('/customers',{'cif':'888','name':'PT Baru','account':'000123456789012','person':'Ani','email':'ani@example.com'},csrf=False)[0],403)
         self.assertEqual(self.maker.call('/logout',{},origin='https://evil.example')[0],403)
@@ -184,7 +243,7 @@ class WorkflowTests(unittest.TestCase):
         status,result,_=self.maker.call('/customers')
         self.assertEqual(status,200)
         self.assertTrue(any(c['cif']=='888' for c in result['customers']))
-        self.assertEqual(self.maker.call('/documents',{'cif':'888','kind':'Warkat','nominal':100,'file':FILE})[0],201)
+        self.assertEqual(self.maker.call('/documents',{**DESTINATION,'cif':'888','kind':'Warkat','nominal':100,'file':FILE})[0],201)
     def test_account_requires_exactly_fifteen_digits(self):
         customer={'cif':'889','name':'Uji','account':'12345678901234','person':'Ani','email':'ani@example.com','phone':'081234567890'}
         for account in ('12345678901234','12345678901234x','1234567890123456','1'*51):
@@ -283,11 +342,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],409)
         self.assertFalse(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
         self.assertEqual(self.sol.call('/customers')[1]['archived_count'],1)
-        self.assertEqual(self.maker.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':10,'file':FILE})[0],409)
+        self.assertEqual(self.maker.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Warkat','nominal':10,'file':FILE})[0],409)
         self.assertEqual(self.maker.call('/documents/'+doc_id)[1]['document']['customer_name'],'PT Maju Bersama')
         self.assertEqual(self.respond(self.token(doc_id))[0],200)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki surat'})[0],200)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',{'version':1,'kind':'Warkat','nominal':10,'file':FILE,'notes':'Diperbaiki'})[0],200)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',{**DESTINATION,'version':1,'kind':'Warkat','nominal':10,'file':FILE,'notes':'Diperbaiki'})[0],200)
         self.assertEqual(self.maker.call('/customers/restore-all',{})[0],403)
         self.assertEqual(self.sol.call('/customers/restore-all',{})[0],200)
         self.assertTrue(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
@@ -369,10 +428,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotEqual(token,new_token)
         self.assertEqual(self.respond(new_token)[0],200)
         for invalid in (-1,0,1.5,True,'1000',1000000000000000):
-            status,_,_=self.maker.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':invalid,'file':FILE})
+            status,_,_=self.maker.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Warkat','nominal':invalid,'file':FILE})
             self.assertEqual(status,400)
         bad_file={'name':'payload.html','base64':base64.b64encode(b'<script>alert(1)</script>').decode()}
-        self.assertEqual(self.maker.call('/documents',{'cif':'1234567','kind':'Warkat','nominal':100,'file':bad_file})[0],400)
+        self.assertEqual(self.maker.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Warkat','nominal':100,'file':bad_file})[0],400)
     def test_concurrent_decisions_single_use(self):
         doc_id=self.create();token=self.token(doc_id)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
