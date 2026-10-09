@@ -69,6 +69,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertEqual(headers['Content-Type'],'application/pdf')
         reader=PdfReader(BytesIO(body))
+        self.assertEqual(len(reader.pages),3)  # Two report pages plus the original, no blank cover.
         text='\n'.join(page.extract_text() for page in reader.pages)
         for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','SOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
             self.assertIn(expected,text)
@@ -91,7 +92,9 @@ class WorkflowTests(unittest.TestCase):
         self.respond(self.token(doc));self.sol.call('/documents/'+doc+'/review',{'version':1,'decision':'approved','notes':''})
         status,body,_=self.sol.call('/documents/'+doc+'/execution-pdf')
         self.assertEqual(status,200)
-        self.assertEqual(PdfReader(BytesIO(body)).attachments['si.png'][0],image.getvalue())
+        reader=PdfReader(BytesIO(body))
+        self.assertEqual(len(reader.pages),3)
+        self.assertEqual(reader.attachments['si.png'][0],image.getvalue())
         malformed=self.create();self.respond(self.token(malformed));self.sol.call('/documents/'+malformed+'/review',{'version':1,'decision':'approved','notes':''})
         self.assertEqual(self.sol.call('/documents/'+malformed+'/execution-pdf')[0],422)
 
