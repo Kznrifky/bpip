@@ -173,7 +173,7 @@ def text_field(data, key, limit=250, required=True):
 
 def valid_phone(value):
     phone = re.sub(r'[\s()-]', '', value)
-    require(not phone or re.fullmatch(r'(?:0[0-9]{9,12}|\+?[1-9][0-9]{9,14})', phone), 'Nomor HP harus 10-15 digit. Gunakan format 08 atau +62.')
+    require(re.fullmatch(r'(?:0[0-9]{9,12}|\+?[1-9][0-9]{9,14})', phone), 'Nomor HP harus 10-15 digit. Gunakan format 08 atau +62.')
     return phone
 
 def valid_email(email):
@@ -652,6 +652,19 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute('DELETE FROM archived_customers')
                 db.commit()
                 return self.respond({'ok':True,'count':count})
+            if path == '/api/customers/archive-selected':
+                require(user['role']=='sol', 'Hanya SOL yang dapat menghapus nasabah.', 403)
+                verify_action_password(db,user,data)
+                cifs = data.get('cifs')
+                require(isinstance(cifs,list) and 0 < len(cifs) <= 1000 and all(isinstance(cif,str) and re.fullmatch(r'[0-9]{3,30}',cif) for cif in cifs), 'Pilih nasabah yang ingin dihapus.')
+                require(len(set(cifs))==len(cifs), 'Daftar nasabah tidak valid.')
+                for cif in cifs:
+                    require(db.execute('SELECT 1 FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)',(cif,)).fetchone(), 'Data nasabah berubah. Muat ulang dan pilih kembali.',409)
+                for cif in cifs:
+                    db.execute('INSERT INTO archived_customers VALUES(?,?,?)',(cif,now(),user['id']))
+                    management_audit(db,'customers/'+cif,'archive',user)
+                db.commit()
+                return self.respond({'ok':True,'archived_count':len(cifs)})
             customer_archive=re.fullmatch(r'/api/customers/([0-9]{3,30})/archive',path)
             if customer_archive:
                 require(user['role']=='sol', 'Hanya SOL yang dapat menghapus nasabah.', 403)
@@ -668,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(user['role']=='sol', 'Hanya SOL yang dapat mengubah data nasabah.', 403)
                 cif = phone_update[1]
                 require(db.execute('SELECT 1 FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)', (cif,)).fetchone(), 'Nasabah tidak ditemukan.', 404)
-                phone = valid_phone(text_field(data, 'phone', 30, required=False))
+                phone = valid_phone(text_field(data, 'phone', 30))
                 db.execute('UPDATE customers SET phone=? WHERE cif=?', (phone,cif))
                 management_audit(db,'customers/'+cif,'Nomor HP diperbarui',user)
                 db.commit()
@@ -679,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
                 account = text_field(data, 'account', 50)
                 require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
-                values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')), valid_phone(text_field(data, 'phone', 30, required=False)))
+                values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')), valid_phone(text_field(data, 'phone', 30)))
                 require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (cif,)).fetchone(), 'CIF sudah terdaftar.', 409)
                 db.execute('INSERT INTO customers(cif,name,account,person,email,phone) VALUES(?,?,?,?,?,?)', values)
                 db.commit()

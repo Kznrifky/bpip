@@ -175,7 +175,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(other.call('/documents/'+doc_id+'/file')[0],403)
         self.assertEqual(other.call('/documents')[1]['documents'],[])
     def test_only_sol_can_add_customer_and_maker_can_use_it(self):
-        customer={'cif':'888','name':'PT Baru','account':'000123456789012','person':'Ani','email':'ani@example.com'}
+        customer={'cif':'888','name':'PT Baru','account':'000123456789012','person':'Ani','email':'ani@example.com','phone':'081234567890'}
         self.assertEqual(self.maker.call('/customers',customer)[0],403)
         self.assertEqual(self.customer.call('/customers',customer)[0],401)
         self.assertEqual(self.sol.call('/customers',customer,csrf=False)[0],403)
@@ -186,7 +186,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any(c['cif']=='888' for c in result['customers']))
         self.assertEqual(self.maker.call('/documents',{'cif':'888','kind':'Warkat','nominal':100,'file':FILE})[0],201)
     def test_account_requires_exactly_fifteen_digits(self):
-        customer={'cif':'889','name':'Uji','account':'12345678901234','person':'Ani','email':'ani@example.com'}
+        customer={'cif':'889','name':'Uji','account':'12345678901234','person':'Ani','email':'ani@example.com','phone':'081234567890'}
         for account in ('12345678901234','12345678901234x','1234567890123456','1'*51):
             customer['account']=account
             self.assertEqual(self.sol.call('/customers',customer)[0],400)
@@ -197,7 +197,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_customer_phone_create_update_and_permissions(self):
         customer={'cif':'887','name':'Uji HP','account':'000123456789012','person':'Direktur','email':'hp@example.com','phone':'081234567890'}
-        self.assertEqual(self.sol.call('/customers',{**customer,'phone':'abc'})[0],400)
+        for phone in ('', '   ', 'abc'):
+            self.assertEqual(self.sol.call('/customers',{**customer,'phone':phone})[0],400)
+        self.assertEqual(self.sol.call('/customers',{k:v for k,v in customer.items() if k != 'phone'})[0],400)
         self.assertEqual(self.sol.call('/customers',customer)[0],201)
         def stored_phone():
             rows=self.maker.call('/customers')[1]['customers']
@@ -208,8 +210,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(stored_phone(), '081234567890')
         self.assertEqual(self.sol.call('/customers/887/phone',{'phone':'+62 812-3456-7890'})[0],200)
         self.assertEqual(stored_phone(), '+6281234567890')
-        self.assertEqual(self.sol.call('/customers/887/phone',{'phone':''})[0],200)
-        self.assertEqual(stored_phone(), '')
+        self.assertEqual(self.sol.call('/customers/887/phone',{'phone':''})[0],400)
+        self.assertEqual(stored_phone(), '+6281234567890')
         self.assertEqual(self.sol.call('/customers/999999/phone',{'phone':'081234567890'})[0],404)
     def test_cancel_preserves_history_and_invalidates_customer_link(self):
         doc_id=self.create();token=self.token(doc_id)
@@ -267,6 +269,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.maker.call('/customers/restore-all',{})[0],403)
         self.assertEqual(self.sol.call('/customers/restore-all',{})[0],200)
         self.assertTrue(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
+    def test_selected_customers_archive_atomically_and_restore(self):
+        doc_id=self.create()
+        payload={'cifs':['1234567','9876543'],'password':'SolDemo!2026'}
+        self.assertEqual(self.maker.call('/customers/archive-selected',payload)[0],403)
+        self.assertEqual(self.sol.call('/customers/archive-selected',{**payload,'password':'wrong'})[0],403)
+        self.assertEqual(self.sol.call('/customers/archive-selected',{**payload,'cifs':['1234567','999999']})[0],409)
+        self.assertEqual(len(self.sol.call('/customers')[1]['customers']),3)
+        self.assertEqual(self.sol.call('/customers/archive-selected',{**payload,'cifs':['1234567','1234567']})[0],400)
+        self.assertEqual(self.sol.call('/customers/archive-selected',payload)[0],200)
+        self.assertEqual([c['cif'] for c in self.sol.call('/customers')[1]['customers']],['5551234'])
+        self.assertEqual(self.maker.call('/documents/'+doc_id)[0],200)
+        self.assertEqual(self.sol.call('/customers/restore-all',{})[0],200)
+        self.assertEqual(len(self.sol.call('/customers')[1]['customers']),3)
     def test_single_archive_does_not_hide_other_documents(self):
         first=self.create();second=self.create()
         self.assertEqual(self.sol.call('/documents/'+first+'/archive',{'version':2,'password':'SolDemo!2026'})[0],409)
