@@ -149,7 +149,7 @@ def verify_action_password(db, user, data):
     if not password_matches(secret_field(data, 'password'), user['password']):
         db.execute('INSERT INTO password_attempts VALUES(?,?)', (user['id'], time.time()))
         db.commit()
-        raise AppError(403, 'Password SOL tidak sesuai.')
+        raise AppError(403, 'Kata sandi SOL salah. Silakan coba lagi.')
     db.execute('DELETE FROM password_attempts WHERE user_id=?', (user['id'],))
 
 def management_audit(db, entity, action, user):
@@ -203,7 +203,7 @@ def transaction_fields(data):
     kind = text_field(data, 'kind')
     nominal = data.get('nominal')
     require(kind in ('Standing Instruction', 'Warkat'), 'Jenis dokumen tidak valid.')
-    require(type(nominal) is int and 0 < nominal <= 999999999999999, 'Nominal harus bilangan bulat positif, maksimal Rp 999.999.999.999.999.')
+    require(type(nominal) is int and 0 < nominal <= 999999999999999, 'Masukkan nominal lebih dari Rp0, tanpa desimal. Maksimal Rp999.999.999.999.999.')
     return kind, nominal, text_field(data, 'description', 1500, False)
 
 def add_audit(db, doc, action, actor, notes='', ip='', agent=''):
