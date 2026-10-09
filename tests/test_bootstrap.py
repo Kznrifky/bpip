@@ -30,6 +30,19 @@ class BootstrapTests(unittest.TestCase):
         with server.database() as db:
             return db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
 
+    def test_phone_migration_preserves_existing_customer(self):
+        with server.database(True) as db:
+            db.execute('DROP TABLE customers')
+            db.execute('CREATE TABLE customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT)')
+            db.execute("INSERT INTO customers VALUES('123','Lama','000123456789012','Direktur','lama@example.com')")
+        server.initialize()
+        server.initialize()
+        with server.database() as db:
+            customer = dict(db.execute('SELECT * FROM customers').fetchone())
+        self.assertEqual(customer['name'], 'Lama')
+        self.assertEqual(customer['account'], '000123456789012')
+        self.assertEqual(customer['phone'], '')
+
     def test_atomic_creation_and_no_password_reset_on_restart(self):
         with patch.dict(os.environ, self.values):
             self.assertTrue(server.bootstrap_users())

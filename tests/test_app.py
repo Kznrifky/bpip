@@ -194,6 +194,23 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.sol.call('/customers',customer)[0],201)
         rows=self.maker.call('/customers')[1]['customers']
         self.assertEqual(next(c['account'] for c in rows if c['cif']=='889'),customer['account'])
+
+    def test_customer_phone_create_update_and_permissions(self):
+        customer={'cif':'887','name':'Uji HP','account':'000123456789012','person':'Direktur','email':'hp@example.com','phone':'081234567890'}
+        self.assertEqual(self.sol.call('/customers',{**customer,'phone':'abc'})[0],400)
+        self.assertEqual(self.sol.call('/customers',customer)[0],201)
+        def stored_phone():
+            rows=self.maker.call('/customers')[1]['customers']
+            return next(c['phone'] for c in rows if c['cif']=='887')
+        self.assertEqual(stored_phone(), '081234567890')
+        self.assertEqual(self.maker.call('/customers/887/phone',{'phone':'+6281234567890'})[0],403)
+        self.assertEqual(self.sol.call('/customers/887/phone',{'phone':'short'})[0],400)
+        self.assertEqual(stored_phone(), '081234567890')
+        self.assertEqual(self.sol.call('/customers/887/phone',{'phone':'+62 812-3456-7890'})[0],200)
+        self.assertEqual(stored_phone(), '+6281234567890')
+        self.assertEqual(self.sol.call('/customers/887/phone',{'phone':''})[0],200)
+        self.assertEqual(stored_phone(), '')
+        self.assertEqual(self.sol.call('/customers/999999/phone',{'phone':'081234567890'})[0],404)
     def test_cancel_preserves_history_and_invalidates_customer_link(self):
         doc_id=self.create();token=self.token(doc_id)
         payload={'version':1,'notes':'Transaksi tidak dilanjutkan'}

@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE, name TE
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT, csrf TEXT, expires REAL);
 CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT, email TEXT, at REAL);
 CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
-CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT);
+CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT, phone TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS archived_documents(doc_id TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS archived_customers(cif TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS management_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT, action TEXT, actor TEXT, at TEXT);
@@ -109,6 +109,9 @@ def initialize():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with database() as db:
         db.executescript(SCHEMA)
+        db.execute('BEGIN IMMEDIATE')
+        if 'phone' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
+            db.execute("ALTER TABLE customers ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
     os.chmod(DB_PATH, 0o600)
 
 def create_user(email, name, role, password):
@@ -167,6 +170,11 @@ def text_field(data, key, limit=250, required=True):
     require((bool(value) or not required) and len(value) <= limit, 'Isi ' + key + ' dengan benar.')
     require('\x00' not in value, 'Karakter tidak valid.')
     return value
+
+def valid_phone(value):
+    phone = re.sub(r'[\s()-]', '', value)
+    require(not phone or re.fullmatch(r'(?:0[0-9]{9,12}|\+?[1-9][0-9]{9,14})', phone), 'Nomor HP harus 10-15 digit. Gunakan format 08 atau +62.')
+    return phone
 
 def valid_email(email):
     require(isinstance(email, str) and len(email) <= 254 and bool(re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', email)), 'Alamat email tidak valid.')
@@ -655,15 +663,25 @@ class Handler(BaseHTTPRequestHandler):
                 management_audit(db,'customers/'+cif,'archive',user)
                 db.commit()
                 return self.respond({'ok':True})
+            phone_update = re.fullmatch(r'/api/customers/([0-9]{3,30})/phone', path)
+            if phone_update:
+                require(user['role']=='sol', 'Hanya SOL yang dapat mengubah data nasabah.', 403)
+                cif = phone_update[1]
+                require(db.execute('SELECT 1 FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)', (cif,)).fetchone(), 'Nasabah tidak ditemukan.', 404)
+                phone = valid_phone(text_field(data, 'phone', 30, required=False))
+                db.execute('UPDATE customers SET phone=? WHERE cif=?', (phone,cif))
+                management_audit(db,'customers/'+cif,'Nomor HP diperbarui',user)
+                db.commit()
+                return self.respond({'ok':True})
             if path == '/api/customers':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menambah nasabah.', 403)
                 cif = text_field(data, 'cif', 30)
                 require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
                 account = text_field(data, 'account', 50)
                 require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
-                values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')))
+                values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')), valid_phone(text_field(data, 'phone', 30, required=False)))
                 require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (cif,)).fetchone(), 'CIF sudah terdaftar.', 409)
-                db.execute('INSERT INTO customers VALUES(?,?,?,?,?)', values)
+                db.execute('INSERT INTO customers(cif,name,account,person,email,phone) VALUES(?,?,?,?,?,?)', values)
                 db.commit()
                 return self.respond({'ok': True}, 201)
             if path == '/api/documents':
@@ -741,7 +759,7 @@ def seed_demo():
     create_user('petugas@bpip.local', 'Rina Wulandari', 'petugas', 'PetugasDemo!2026')
     create_user('sol@bpip.local', 'Bambang Haryanto', 'sol', 'SolDemo!2026')
     with database(True) as db:
-        db.executemany('INSERT INTO customers VALUES(?,?,?,?,?)', [
+        db.executemany('INSERT INTO customers(cif,name,account,person,email) VALUES(?,?,?,?,?)', [
             ('1234567', 'PT Maju Bersama', '001234567890', 'Budi Santoso', 'budi@example.com'),
             ('9876543', 'CV Karya Mandiri', '002987654321', 'Ahmad Fadli', 'ahmad@example.com'),
             ('5551234', 'PT Sentra Niaga Global', '003555123456', 'Dewi Lestari', 'dewi@example.com')])
