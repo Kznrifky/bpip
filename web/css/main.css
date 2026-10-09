@@ -74,7 +74,7 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 .page-heading{align-items:center}.settings-page .page-heading{align-items:center}@media(max-width:760px){.page-heading{flex-wrap:wrap;gap:16px}}
 
 /* Consistent submission status boxes and a dedicated date-filter row. */
-.submission-table td:nth-child(3) .badge,.submission-table td:nth-child(4) .badge{width:176px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:6px;white-space:nowrap}
+.submission-table td:nth-child(3) .badge,.submission-table td:nth-child(4) .badge{width:160px;min-height:30px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:6px;white-space:nowrap}
 
 
 /* Prioritize dashboard table space and align submission column headings. */
@@ -89,4 +89,8 @@ dialog{border:1px solid var(--line);border-radius:17px;padding:0;max-width:510px
 .range-footer [data-range-reset]{margin-right:auto}
 
 /* Subtle grid lines keep submission columns and rows distinct. */
-.submission-table{border-collapse:collapse}.submission-table th,.submission-table td{border-bottom:1px solid #d5e2f2}.submission-table th+th,.submission-table td+td{border-left:1px solid #d5e2f2}
+.submission-table{border-collapse:collapse}.submission-table th,.submission-table td{border-bottom:1px solid #e2eaf5}.submission-table th+th,.submission-table td+td{border-left:1px solid #e2eaf5}
+
+/* More room for submission content, with compact and consistent status badges. */
+.submission-table{table-layout:fixed;min-width:790px}.submission-table th,.submission-table td{padding:15px 14px}.submission-table th{white-space:normal;line-height:1.5;letter-spacing:.5px;padding-block:12px}.submission-table th:nth-child(1){width:24%}.submission-table th:nth-child(2){width:20%}.submission-table th:nth-child(3),.submission-table th:nth-child(4){width:24%}.submission-table th:nth-child(5){width:8%}.submission-table td:nth-child(1),.submission-table td:nth-child(2){white-space:normal;overflow-wrap:anywhere}.submission-table td:nth-child(3) .badge,.submission-table td:nth-child(4) .badge{padding:4px 8px;font-size:10px;max-width:100%}.submission-table.monitoring-table{min-width:740px}.monitoring-table th:nth-child(1){width:25%}.monitoring-table th:nth-child(2){width:21%}.monitoring-table th:nth-child(3){width:26%}.monitoring-table th:nth-child(4){width:28%}
+.section-layout{align-items:start}.section-layout>.dashboard-side{align-self:start}.section-layout>.dashboard-side>.card{flex:none}.section-layout>.dashboard-side .activity-list{flex:none}.dashboard-side .activity-item>div{min-width:0;overflow-wrap:anywhere}@media(min-width:1251px) and (max-width:1359px){.section-layout{grid-template-columns:minmax(0,1fr)}.section-layout>.dashboard-side{display:block}}@media(max-width:760px){.submission-table th,.submission-table td{padding-inline:12px}}
