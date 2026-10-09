@@ -629,6 +629,21 @@ class Handler(BaseHTTPRequestHandler):
                 management_audit(db,kind+'/'+key,operation,user)
                 db.commit()
                 return self.respond({'ok':True})
+            if path == '/api/documents/archive-selected':
+                require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus pengajuan.', 403)
+                verify_action_password(db, user, data)
+                selected = data.get('documents')
+                require(isinstance(selected, list) and 0 < len(selected) <= 1000 and all(isinstance(item, dict) and isinstance(item.get('id'), str) and type(item.get('version')) is int for item in selected), 'Pilih pengajuan yang ingin dihapus.')
+                require(len({item['id'] for item in selected}) == len(selected), 'Daftar pengajuan tidak valid.')
+                docs = []
+                for item in selected:
+                    doc = db.execute('SELECT * FROM documents WHERE id=? AND NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)', (item['id'],)).fetchone()
+                    require(doc is not None and doc['version'] == item['version'], 'Pengajuan berubah. Muat ulang dan pilih kembali.', 409)
+                    docs.append(doc)
+                for doc in docs:
+                    archive_document(db, doc, user, ip, agent)
+                db.commit()
+                return self.respond({'ok': True, 'count': len(docs)})
             if path in ('/api/documents/archive-all', '/api/documents/restore-all'):
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus atau memulihkan pengajuan.', 403)
                 if path.endswith('/archive-all'):

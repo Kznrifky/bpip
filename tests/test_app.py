@@ -233,6 +233,28 @@ class WorkflowTests(unittest.TestCase):
         doc_id=self.create();self.respond(self.token(doc_id))
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],200)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':'Uji'})[0],409)
+    def test_selected_documents_archive_only_selection_atomically(self):
+        first=self.create();second=self.create()
+        first_token=self.token(first);second_token=self.token(second)
+        endpoint='/documents/archive-selected'
+        payload={'documents':[{'id':first,'version':1}],'password':'SolDemo!2026'}
+        self.assertEqual(self.maker.call(endpoint,payload)[0],403)
+        self.assertEqual(self.sol.call(endpoint,payload,csrf=False)[0],403)
+        self.assertEqual(self.sol.call(endpoint,{**payload,'password':'wrong'})[0],403)
+        for selection,code in [([],400),([{'id':first,'version':1}]*2,400),([{'id':first,'version':1},{'id':second,'version':2}],409),([{'id':first,'version':1},{'id':'missing','version':1}],409)]:
+            self.assertEqual(self.sol.call(endpoint,{**payload,'documents':selection})[0],code)
+            self.assertEqual(len(self.maker.call('/documents')[1]['documents']),2)
+        self.assertEqual(self.sol.call(endpoint,payload)[1]['count'],1)
+        self.assertEqual([d['id'] for d in self.maker.call('/documents')[1]['documents']],[second])
+        self.assertEqual(self.sol.call('/documents')[1]['archived_count'],1)
+        self.assertEqual(self.customer.call('/portal',{'token':first_token})[0],410)
+        self.assertEqual(self.customer.call('/portal',{'token':second_token})[0],200)
+        self.assertEqual(self.sol.call(endpoint,payload)[0],409)
+        with app.database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM documents').fetchone()[0],2)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM versions WHERE doc_id=?',(first,)).fetchone()[0],1)
+        self.assertEqual(len(self.sol.call('/customers')[1]['customers']),3)
+
     def test_sol_archive_all_and_restore_preserve_records(self):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/archive',{'version':1})[0],403)
