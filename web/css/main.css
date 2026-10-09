@@ -164,3 +164,32 @@ body { min-width: 320px; }
 
 /* The submission form fills the space freed by the removed guidance panel. */
 .form-layout { grid-template-columns: minmax(0, 1fr); }
+
+/* Customer edits use the existing table and dialog styles. */
+.customer-table { min-width: 940px; }
+.customer-table .customer-cif-col { width: 10%; }
+.customer-table .customer-name-col { width: 17%; }
+.customer-table .customer-account-col { width: 17%; }
+.customer-table .customer-role-col { width: 12%; }
+.customer-table .customer-email-col { width: 20%; }
+.customer-table .customer-phone-col { width: 15%; }
+.customer-table .customer-action-col { width: 9%; }
+.customer-updates-table { min-width: 880px; }
+.customer-updates-table td { white-space: normal; overflow-wrap: anywhere; }
+.customer-updates-table td:last-child { white-space: nowrap; }
+.customer-updates-table .badge { white-space: nowrap; }
+.customer-change-comparison { table-layout: fixed; width: 100%; min-width: 0; }
+.customer-change-comparison th, .customer-change-comparison td { white-space: normal; overflow-wrap: anywhere; padding: 12px; }
+.customer-change-comparison th:first-child { width: 24%; }
+dialog:has(.customer-change-comparison), dialog:has(#customer-form) { max-height: calc(100dvh - 32px); overflow: auto; }
+dialog:has(.customer-change-comparison) { max-width: 720px; }
+@media (max-width: 760px) {
+  .customer-change-comparison th, .customer-change-comparison td { padding: 8px; font-size: 11px; }
+  dialog:has(.customer-change-comparison) .dialog-footer { flex-wrap: wrap; gap: 8px; }
+}
+
+.customer-updates-head > .input { width: 180px; max-width: 100%; }
+@media (max-width: 760px) {
+  .customer-updates-head { flex-wrap: wrap; gap: 16px; }
+  .customer-updates-head > .input { width: 100%; }
+}

@@ -54,7 +54,13 @@ CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE, name TE
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT, csrf TEXT, expires REAL);
 CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT, email TEXT, at REAL);
 CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
-CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT, phone TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT, phone TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS customer_edit_requests(
+ id TEXT PRIMARY KEY, cif TEXT NOT NULL, old_data TEXT NOT NULL, new_data TEXT NOT NULL,
+ reason TEXT NOT NULL, requested_by TEXT NOT NULL, requested_name TEXT NOT NULL,
+ created TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reviewed_by TEXT,
+ reviewed_name TEXT NOT NULL DEFAULT '', review_notes TEXT NOT NULL DEFAULT '', reviewed_at TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS customer_edit_pending ON customer_edit_requests(cif) WHERE status='pending';
 CREATE TABLE IF NOT EXISTS archived_documents(doc_id TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS archived_customers(cif TEXT PRIMARY KEY, archived_at TEXT, actor TEXT);
 CREATE TABLE IF NOT EXISTS management_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT, action TEXT, actor TEXT, at TEXT);
@@ -114,6 +120,8 @@ def initialize():
         db.execute('BEGIN IMMEDIATE')
         if 'phone' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
             db.execute("ALTER TABLE customers ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+        if 'revision' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
+            db.execute('ALTER TABLE customers ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
         for table in ('documents', 'versions'):
             columns = {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
             for column in ('destination_account', 'destination_name'):
@@ -212,10 +220,34 @@ def transaction_fields(data):
     require(kind in ('Standing Instruction', 'Warkat'), 'Jenis dokumen tidak valid.')
     require(type(nominal) is int and 0 < nominal <= 999999999999999, 'Masukkan nominal lebih dari Rp0, tanpa desimal. Maksimal Rp999.999.999.999.999.')
     destination_account = data.get('destination_account')
-    require(isinstance(destination_account, str) and bool(re.fullmatch(r'[0-9]{1,30}', destination_account.strip())), 'Rekening tujuan wajib diisi dengan angka, maksimal 30 digit.')
+    require(isinstance(destination_account, str) and bool(re.fullmatch(r'[0-9]{15}', destination_account.strip())), 'Rekening tujuan BRI wajib terdiri dari tepat 15 digit angka.')
     destination_name = data.get('destination_name')
     require(isinstance(destination_name, str) and 0 < len(destination_name.strip()) <= 250, 'Atas nama rekening tujuan wajib diisi, maksimal 250 karakter.')
     return kind, nominal, text_field(data, 'description', 1500, False), destination_account.strip(), destination_name.strip()
+
+CUSTOMER_FIELDS = ('name', 'account', 'person', 'email', 'phone')
+
+def customer_snapshot(customer):
+    return {key: customer[key] for key in ('cif', *CUSTOMER_FIELDS, 'revision')}
+
+def customer_edit_payload(row):
+    result = dict(row)
+    result['old_data'] = json.loads(result['old_data'])
+    result['new_data'] = json.loads(result['new_data'])
+    return result
+
+def request_customer_edit(db, customer, proposed, reason, user):
+    require(not db.execute("SELECT 1 FROM customer_edit_requests WHERE cif=? AND status='pending'", (customer['cif'],)).fetchone(), 'Masih ada pembaruan nasabah yang menunggu persetujuan BOH.', 409)
+    before = customer_snapshot(customer)
+    after = {**before, **proposed}
+    require(any(before[key] != after[key] for key in CUSTOMER_FIELDS), 'Tidak ada perubahan data nasabah.')
+    request_id = secrets.token_hex(12)
+    db.execute('INSERT INTO customer_edit_requests(id,cif,old_data,new_data,reason,requested_by,requested_name,created) VALUES(?,?,?,?,?,?,?,?)', (request_id, customer['cif'], json.dumps(before), json.dumps(after), reason, user['id'], user['name'], now()))
+    management_audit(db, 'customers/' + customer['cif'], 'Pembaruan diajukan ke BOH: ' + request_id, user)
+    return request_id
+
+def cancel_customer_edits(db, cif, user):
+    db.execute("UPDATE customer_edit_requests SET status='cancelled',reviewed_by=?,reviewed_name=?,review_notes='Nasabah dihapus oleh SOL.',reviewed_at=? WHERE cif=? AND status='pending'", (user['id'], user['name'], now(), cif))
 
 def add_audit(db, doc, action, actor, notes='', ip='', agent=''):
     db.execute('INSERT INTO audit(doc_id,version,action,actor,notes,at,ip,agent) VALUES(?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], action, actor, notes, now(), ip, agent[:300]))
@@ -480,7 +512,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/'):
             with database() as db:
                 user = self.session(db)
-                require(user['role'] != 'boh' or path == '/api/documents', 'BOH hanya dapat memantau dashboard.', 403)
+                require(user['role'] != 'boh' or path in ('/api/documents', '/api/customer-edit-requests'), 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah.', 403)
+                if path == '/api/customer-edit-requests':
+                    require(user['role'] in ('sol', 'boh'), 'Hanya SOL dan BOH yang dapat melihat pembaruan nasabah.', 403)
+                    return self.respond({'requests': [customer_edit_payload(row) for row in db.execute("SELECT * FROM customer_edit_requests ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, created DESC")]})
                 if path == '/api/customers':
                     return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers WHERE NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif) ORDER BY name')], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0] if user['role']=='sol' else 0})
                 if path == '/api/documents':
@@ -622,7 +657,39 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute('DELETE FROM sessions WHERE user_id=? AND csrf<>?', (user['id'], user['csrf']))
                 db.commit()
                 return self.respond({'ok': True})
-            require(user['role']!='boh', 'BOH hanya dapat memantau dashboard.', 403)
+            customer_review = re.fullmatch(r'/api/customer-edit-requests/([0-9a-f]{24})/review', path)
+            if customer_review:
+                require(user['role'] == 'boh', 'Hanya BOH yang dapat memutuskan pembaruan nasabah.', 403)
+                request = db.execute('SELECT * FROM customer_edit_requests WHERE id=?', (customer_review[1],)).fetchone()
+                require(request is not None, 'Pembaruan nasabah tidak ditemukan.', 404)
+                require(request['status'] == 'pending', 'Pembaruan ini sudah diputuskan.', 409)
+                decision = data.get('decision')
+                require(decision in ('approved', 'rejected'), 'Keputusan tidak valid.')
+                notes = text_field(data, 'notes', 1500, decision == 'rejected')
+                if decision == 'approved':
+                    customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (request['cif'],)).fetchone()
+                    require(customer is not None, 'Nasabah sudah dihapus. Pembaruan tidak dapat disetujui.', 409)
+                    before, after = json.loads(request['old_data']), json.loads(request['new_data'])
+                    require(customer_snapshot(customer) == before, 'Data nasabah sudah berubah. Tolak permintaan ini dan minta SOL mengajukan pembaruan baru.', 409)
+                    db.execute('UPDATE customers SET name=?,account=?,person=?,email=?,phone=?,revision=revision+1 WHERE cif=?', (*[after[key] for key in CUSTOMER_FIELDS], request['cif']))
+                db.execute('UPDATE customer_edit_requests SET status=?,reviewed_by=?,reviewed_name=?,review_notes=?,reviewed_at=? WHERE id=?', (decision, user['id'], user['name'], notes, now(), request['id']))
+                management_audit(db, 'customers/' + request['cif'], ('BOH menyetujui' if decision == 'approved' else 'BOH menolak') + ' pembaruan: ' + request['id'], user)
+                db.commit()
+                return self.respond({'ok': True})
+            require(user['role']!='boh', 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah.', 403)
+            customer_edit = re.fullmatch(r'/api/customers/([0-9]{3,30})/edit-requests', path)
+            if customer_edit:
+                require(user['role'] == 'sol', 'Hanya SOL yang dapat mengajukan pembaruan nasabah.', 403)
+                customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (customer_edit[1],)).fetchone()
+                require(customer is not None, 'Nasabah tidak ditemukan.', 404)
+                require(type(data.get('revision')) is int and data['revision'] == customer['revision'], 'Data nasabah sudah berubah. Muat ulang sebelum mengedit.', 409)
+                require(data.get('cif', customer['cif']) == customer['cif'], 'CIF nasabah tidak dapat diubah.')
+                account = text_field(data, 'account', 15)
+                require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
+                proposed = {'name': text_field(data, 'name'), 'account': account, 'person': text_field(data, 'person'), 'email': valid_email(text_field(data, 'email', 254)), 'phone': valid_phone(text_field(data, 'phone', 30))}
+                request_id = request_customer_edit(db, customer, proposed, text_field(data, 'reason', 1500), user)
+                db.commit()
+                return self.respond({'id': request_id, 'status': 'pending'}, 201)
             item=re.fullmatch(r'/api/(customers|documents)/([^/]+)/(restore|purge)',path)
             if item:
                 require(user['role']=='sol', 'Hanya SOL yang dapat mengelola arsip.',403)
@@ -633,6 +700,7 @@ class Handler(BaseHTTPRequestHandler):
                     verify_action_password(db,user,data)
                     require(data.get('confirmation')==key, 'Konfirmasi identitas data tidak sesuai.')
                     if kind=='customers':
+                        cancel_customer_edits(db, key, user)
                         db.execute('DELETE FROM customers WHERE cif=?',(key,))
                     else:
                         for child in ('outbox','versions'):
@@ -689,6 +757,7 @@ class Handler(BaseHTTPRequestHandler):
                 for cif in cifs:
                     require(db.execute('SELECT 1 FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)',(cif,)).fetchone(), 'Data nasabah berubah. Muat ulang dan pilih kembali.',409)
                 for cif in cifs:
+                    cancel_customer_edits(db, cif, user)
                     db.execute('DELETE FROM customers WHERE cif=?',(cif,))
                     management_audit(db,'customers/'+cif,'delete',user)
                 db.commit()
@@ -701,6 +770,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(db.execute('SELECT 1 FROM customers WHERE cif=?',(cif,)).fetchone(), 'Nasabah tidak ditemukan.',404)
                 require(not db.execute('SELECT 1 FROM archived_customers WHERE cif=?',(cif,)).fetchone(), 'Nasabah sudah dihapus.',409)
                 db.execute('INSERT INTO archived_customers VALUES(?,?,?)',(cif,now(),user['id']))
+                cancel_customer_edits(db, cif, user)
                 management_audit(db,'customers/'+cif,'archive',user)
                 db.commit()
                 return self.respond({'ok':True})
@@ -708,12 +778,12 @@ class Handler(BaseHTTPRequestHandler):
             if phone_update:
                 require(user['role']=='sol', 'Hanya SOL yang dapat mengubah data nasabah.', 403)
                 cif = phone_update[1]
-                require(db.execute('SELECT 1 FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)', (cif,)).fetchone(), 'Nasabah tidak ditemukan.', 404)
+                customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)', (cif,)).fetchone()
+                require(customer is not None, 'Nasabah tidak ditemukan.', 404)
                 phone = valid_phone(text_field(data, 'phone', 30))
-                db.execute('UPDATE customers SET phone=? WHERE cif=?', (phone,cif))
-                management_audit(db,'customers/'+cif,'Nomor HP diperbarui',user)
+                request_id = request_customer_edit(db, customer, {'phone': phone}, text_field(data, 'reason', 1500, False) or 'Pembaruan nomor HP nasabah.', user)
                 db.commit()
-                return self.respond({'ok':True})
+                return self.respond({'ok':True, 'id': request_id, 'status': 'pending'})
             if path == '/api/customers':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menambah nasabah.', 403)
                 cif = text_field(data, 'cif', 30)

@@ -42,6 +42,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(customer['name'], 'Lama')
         self.assertEqual(customer['account'], '000123456789012')
         self.assertEqual(customer['phone'], '')
+        self.assertEqual(customer['revision'], 0)
 
     def test_atomic_creation_and_no_password_reset_on_restart(self):
         with patch.dict(os.environ, self.values):

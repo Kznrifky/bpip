@@ -51,6 +51,116 @@ class Client:
         return headers
 
 class WorkflowTests(unittest.TestCase):
+    def boh_client(self, email='boh.approval@example.test'):
+        app.create_user(email, 'BOH Approval', 'boh', 'BohApproval!2026')
+        client = Client(self.url)
+        result = client.call('/login', {'email': email, 'password': 'BohApproval!2026'})[1]
+        client.csrf = result['csrf']
+        return client
+
+    def customer_edit(self, cif='1234567', **changes):
+        customer = next(row for row in self.sol.call('/customers')[1]['customers'] if row['cif'] == cif)
+        return {**customer, 'account': '000123456789012', 'phone': '081234567890', 'reason': 'Pembaruan data nasabah', **changes}
+
+    def test_customer_edit_approval_updates_master_only(self):
+        boh = self.boh_client()
+        existing_doc = self.create()
+        payload = self.customer_edit(name='PT Nama Baru', email='baru@example.test', person='Direktur Baru')
+        status, result, _ = self.sol.call('/customers/1234567/edit-requests', payload)
+        self.assertEqual(status, 201, result)
+        request_id = result['id']
+        self.assertEqual(self.maker.call('/customers')[1]['customers'][0]['revision'], 0)
+        self.assertEqual(self.maker.call('/documents/' + existing_doc)[1]['document']['customer_name'], 'PT Maju Bersama')
+        before = next(c for c in self.maker.call('/customers')[1]['customers'] if c['cif'] == '1234567')
+        self.assertEqual(before['email'], 'budi@example.com')
+        app.initialize()  # Pending requests survive startup.
+        request = boh.call('/customer-edit-requests')[1]['requests'][0]
+        self.assertEqual(request['new_data']['email'], payload['email'])
+        self.assertEqual(request['old_data']['email'], before['email'])
+        self.assertEqual(request['status'], 'pending')
+        route = '/customer-edit-requests/' + request_id + '/review'
+        self.assertEqual(boh.call(route, {'decision': 'approved', 'notes': 'Data sesuai'})[0], 200)
+        after = next(c for c in self.maker.call('/customers')[1]['customers'] if c['cif'] == '1234567')
+        for key in app.CUSTOMER_FIELDS:
+            self.assertEqual(after[key], payload[key])
+        self.assertEqual(after['revision'], 1)
+        old = self.maker.call('/documents/' + existing_doc)[1]['document']
+        self.assertEqual(old['email'], before['email'])
+        self.assertEqual(old['customer_name'], before['name'])
+        new_doc = self.create()
+        self.assertEqual(self.maker.call('/documents/' + new_doc)[1]['document']['email'], payload['email'])
+        reviewed = self.sol.call('/customer-edit-requests')[1]['requests'][0]
+        self.assertEqual(reviewed['status'], 'approved')
+        self.assertEqual(reviewed['review_notes'], 'Data sesuai')
+        self.assertTrue(reviewed['reviewed_at'])
+        with app.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM management_audit WHERE action LIKE 'BOH menyetujui pembaruan:%'").fetchone()[0], 1)
+
+    def test_customer_edit_rejection_permissions_and_csrf(self):
+        boh = self.boh_client()
+        payload = self.customer_edit()
+        endpoint = '/customers/1234567/edit-requests'
+        self.assertEqual(self.maker.call(endpoint, payload)[0], 403)
+        self.assertEqual(boh.call(endpoint, payload)[0], 403)
+        self.assertEqual(self.sol.call(endpoint, payload, csrf=False)[0], 403)
+        self.assertEqual(self.maker.call('/customer-edit-requests')[0], 403)
+        self.assertEqual(self.customer.call('/customer-edit-requests')[0], 401)
+        request_id = self.sol.call(endpoint, payload)[1]['id']
+        route = '/customer-edit-requests/' + request_id + '/review'
+        decision = {'decision': 'approved'}
+        for client in (self.sol, self.maker):
+            self.assertEqual(client.call(route, decision)[0], 403)
+        self.assertEqual(boh.call(route, decision, csrf=False)[0], 403)
+        self.assertEqual(boh.call(route, {'decision': 'invalid'})[0], 400)
+        self.assertEqual(boh.call(route, {'decision': 'rejected', 'notes': ' '})[0], 400)
+        self.assertEqual(boh.call(route, {'decision': 'rejected', 'notes': 'Email belum terverifikasi'})[0], 200)
+        self.assertEqual(boh.call(route, decision)[0], 409)
+        customer = next(c for c in self.sol.call('/customers')[1]['customers'] if c['cif'] == '1234567')
+        self.assertEqual(customer['revision'], 0)
+        self.assertEqual(customer['account'], '001234567890')
+        self.assertEqual(self.sol.call('/customer-edit-requests')[1]['requests'][0]['review_notes'], 'Email belum terverifikasi')
+
+    def test_customer_edit_validation_duplicate_and_stale_data(self):
+        boh = self.boh_client()
+        payload = self.customer_edit()
+        endpoint = '/customers/1234567/edit-requests'
+        for key, invalid in [('name', ''), ('person', ''), ('email', 'invalid'), ('account', '123'), ('phone', 'abc'), ('reason', ''), ('cif', '999')]:
+            with self.subTest(key=key):
+                self.assertEqual(self.sol.call(endpoint, {**payload, key: invalid})[0], 400)
+        self.assertEqual(self.sol.call(endpoint, {**payload, 'revision': 1})[0], 409)
+        request_id = self.sol.call(endpoint, payload)[1]['id']
+        self.assertEqual(self.sol.call(endpoint, payload)[0], 409)
+        route = '/customer-edit-requests/' + request_id + '/review'
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET email='external@example.test' WHERE cif='1234567'")
+        self.assertEqual(boh.call(route, {'decision': 'approved'})[0], 409)
+        self.assertEqual(boh.call(route, {'decision': 'rejected', 'notes': 'Data sudah berubah'})[0], 200)
+        payload = self.customer_edit(email='baru@example.test')
+        next_id = self.sol.call(endpoint, payload)[1]['id']
+        self.assertEqual(boh.call('/customer-edit-requests/' + next_id + '/review', {'decision': 'approved'})[0], 200)
+        self.assertEqual(self.sol.call(endpoint, payload)[0], 409)
+        self.assertEqual(self.sol.call(endpoint, self.customer_edit(email='baru@example.test'))[0], 400)  # No changed fields.
+
+    def test_customer_edit_concurrent_decisions_are_atomic(self):
+        first = self.boh_client()
+        second = self.boh_client('boh.second@example.test')
+        request_id = self.sol.call('/customers/1234567/edit-requests', self.customer_edit())[1]['id']
+        route = '/customer-edit-requests/' + request_id + '/review'
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda client: client.call(route, {'decision': 'approved'})[0], (first, second)))
+        self.assertEqual(sorted(results), [200, 409])
+        with app.database() as db:
+            self.assertEqual(db.execute("SELECT revision FROM customers WHERE cif='1234567'").fetchone()[0], 1)
+
+    def test_customer_delete_cancels_pending_edits(self):
+        boh = self.boh_client()
+        request_id = self.sol.call('/customers/1234567/edit-requests', self.customer_edit())[1]['id']
+        self.assertEqual(self.sol.call('/customers/delete-selected', {'cifs': ['1234567'], 'password': 'SolDemo!2026'})[0], 200)
+        self.assertEqual(boh.call('/customer-edit-requests/' + request_id + '/review', {'decision': 'approved'})[0], 409)
+        request = boh.call('/customer-edit-requests')[1]['requests'][0]
+        self.assertEqual(request['status'], 'cancelled')
+        self.assertEqual(request['old_data']['name'], 'PT Maju Bersama')
+
     def test_destination_required_and_preserved_in_confirmation(self):
         payload = {'cif': '1234567', 'kind': 'Warkat', 'nominal': 100, 'file': FILE, **DESTINATION}
         for field in DESTINATION:
@@ -59,7 +169,7 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(self.maker.call('/documents', {**payload, field: invalid})[0], 400)
             missing = {key: value for key, value in payload.items() if key != field}
             self.assertEqual(self.maker.call('/documents', missing)[0], 400)
-        for invalid in ('123abc', '1' * 31):
+        for invalid in ('123abc', '1' * 14, '1' * 16, '1' * 31):
             self.assertEqual(self.maker.call('/documents', {**payload, 'destination_account': invalid})[0], 400)
         self.assertEqual(self.maker.call('/documents', {**payload, 'destination_name': 'a' * 251})[0], 400)
         doc = self.maker.call('/documents', {**payload, 'destination_name': ' PT Tujuan Pembayaran '})[1]['id']
@@ -267,7 +377,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.maker.call('/customers/887/phone',{'phone':'+6281234567890'})[0],403)
         self.assertEqual(self.sol.call('/customers/887/phone',{'phone':'short'})[0],400)
         self.assertEqual(stored_phone(), '081234567890')
-        self.assertEqual(self.sol.call('/customers/887/phone',{'phone':'+62 812-3456-7890'})[0],200)
+        status,result,_=self.sol.call('/customers/887/phone',{'phone':'+62 812-3456-7890'})
+        self.assertEqual(status,200)
+        self.assertEqual(stored_phone(), '081234567890')
+        boh=self.boh_client()
+        self.assertEqual(boh.call('/customer-edit-requests/'+result['id']+'/review',{'decision':'approved'})[0],200)
         self.assertEqual(stored_phone(), '+6281234567890')
         self.assertEqual(self.sol.call('/customers/887/phone',{'phone':''})[0],400)
         self.assertEqual(stored_phone(), '+6281234567890')

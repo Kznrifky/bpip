@@ -99,7 +99,7 @@ node --check web/js/app.js
 
 Tes menggunakan server HTTP sementara dan database terpisah. Mencakup alur revisi/approval, penolakan nasabah, RBAC/ownership, CSRF/origin, validasi nominal/file/rekening tujuan, migrasi data lama, tautan kedaluwarsa dan pembatalan token, dua keputusan bersamaan, persistensi, outbox lokal, SMTP dengan mock, retry gagal, password/sesi dan limit login. Tidak mengirim email nyata. Surat contoh yang disediakan hanya untuk pengujian.
 
-Rekening tujuan dan atas nama rekening tujuan wajib diisi untuk setiap pengajuan baru dan revisi, baik Standing Instruction maupun Warkat. Nomor tujuan disimpan sebagai teks agar nol di depan tetap utuh (angka, maksimal 30 digit); nama pemilik maksimal 250 karakter. Keduanya tersimpan pada setiap versi dan ditampilkan pada email, konfirmasi nasabah, detail pengajuan, serta PDF pelaksanaan. Startup menambahkan kolom secara otomatis tanpa menghapus data lama; rekening tujuan pada pengajuan lama yang belum dicatat ditampilkan sebagai “Belum tercatat”.
+Rekening tujuan dan atas nama rekening tujuan wajib diisi untuk setiap pengajuan baru dan revisi, baik Standing Instruction maupun Warkat. Nomor tujuan disimpan sebagai teks agar nol di depan tetap utuh (rekening BRI, tepat 15 digit angka); nama pemilik maksimal 250 karakter. Keduanya tersimpan pada setiap versi dan ditampilkan pada email, konfirmasi nasabah, detail pengajuan, serta PDF pelaksanaan. Startup menambahkan kolom secara otomatis tanpa menghapus data lama; rekening tujuan pada pengajuan lama yang belum dicatat ditampilkan sebagai “Belum tercatat”.
 
 Nomor rekening untuk nasabah baru harus terdiri dari tepat 15 digit, termasuk nol di depan. Petugas dapat membatalkan pengajuannya sendiri selama belum disetujui atau ditolak SOL, termasuk saat diminta revisi. Alasan wajib dicatat; surat dan audit dipertahankan, tautan nasabah dinonaktifkan, serta email yang belum diproses dibatalkan. Email yang sedang dikirim atau sudah terkirim tidak dapat ditarik kembali.
 
@@ -111,7 +111,7 @@ Pencarian nama nasabah atau CIF tersedia pada tabel Data nasabah (SOL) dan formu
 
 SOL menghapus nasabah/pengajuan ke arsip dengan password akun yang sedang login. Tombol Pulihkan membuka daftar arsip untuk pemulihan per data. Hapus permanen hanya tersedia di arsip, memerlukan password SOL serta CIF/ID yang diketik ulang. Penghapusan master nasabah mempertahankan snapshot surat dan pengajuan lama. Penghapusan permanen pengajuan menghapus dokumen, semua file versinya, dan antrean email; catatan audit tetap disimpan. Tautan lama tidak diaktifkan kembali saat pemulihan.
 
-Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun BOH melalui SOL sudah dinonaktifkan. BOH hanya dapat membaca ringkasan dashboard semua pengajuan dan mengelola password akun sendiri. API BOH menolak akses master nasabah, surat, audit detail, email, dan semua tindakan operasional.
+Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun BOH melalui SOL sudah dinonaktifkan. BOH dapat membaca ringkasan dashboard semua pengajuan, memutuskan pembaruan data nasabah dari SOL, dan mengelola password akun sendiri. API BOH tetap menolak akses daftar master nasabah, surat, audit pengajuan, email, pembuatan transaksi, dan tindakan operasional SOL. Data nasabah lama dan usulan perubahan tersedia hanya pada daftar persetujuan nasabah bagi SOL dan BOH.
 
 ### Pengiriman email dan Inbox
 
@@ -119,6 +119,14 @@ Email konfirmasi menyertakan Date, Message-ID, identitas pengirim, Reply-To, ser
 
 ## PDF pelaksanaan setelah persetujuan
 
-Buka detail pengajuan yang telah disetujui nasabah dan SOL, lalu pilih **Unduh PDF pelaksanaan**. Petugas pembuat dan SOL dapat mengunduh; BOH tetap hanya memantau dashboard. PDF memuat surat konfirmasi pelaksanaan, identitas pembuat, pernyataan serta waktu konfirmasi nasabah, persetujuan SOL, log aktivitas, dan surat terakhir yang disetujui. File asli disertakan sebagai lampiran PDF dan hash SHA-256 dicantumkan. PDF/JPG/PNG didukung. PDF rusak atau dilindungi kata sandi menghasilkan pesan kesalahan, bukan laporan tanpa dokumen asli.
+Buka detail pengajuan yang telah disetujui nasabah dan SOL, lalu pilih **Unduh PDF pelaksanaan**. Petugas pembuat dan SOL dapat mengunduh; BOH tidak memiliki akses unduhan PDF transaksi. PDF memuat surat konfirmasi pelaksanaan, identitas pembuat, pernyataan serta waktu konfirmasi nasabah, persetujuan SOL, log aktivitas, dan surat terakhir yang disetujui. File asli disertakan sebagai lampiran PDF dan hash SHA-256 dicantumkan. PDF/JPG/PNG didukung. PDF rusak atau dilindungi kata sandi menghasilkan pesan kesalahan, bukan laporan tanpa dokumen asli.
 
 Surat ini merupakan bukti selesainya alur persetujuan, bukan bukti eksekusi transaksi atau tanda tangan digital tersertifikasi. Tidak ada penanda versi yang ditampilkan; snapshot revisi tetap disimpan secara internal.
+
+### Edit data nasabah dengan persetujuan BOH
+
+SOL memilih **Data nasabah → Edit**, mengubah nama, nomor rekening, jabatan, email, atau nomor HP, lalu mengisi alasan dan memilih **Ajukan ke BOH**. CIF tetap menjadi identitas nasabah. Usulan masuk ke menu **Pembaruan nasabah** pada SOL dan BOH; jumlah yang menunggu ditampilkan pada navigasi dan diperbarui otomatis.
+
+BOH memilih **Periksa** untuk membandingkan data sebelumnya dan usulan SOL. **Setujui perubahan** memperbarui master nasabah secara atomik; **Tolak** wajib disertai catatan dan mempertahankan data lama. Pemohon, alasan, data sebelum/sesudah, keputusan, catatan, dan waktu tersimpan dalam riwayat. Satu nasabah hanya memiliki satu usulan yang menunggu persetujuan. Data yang berubah sejak pengajuan mencegah persetujuan usulan lama; penghapusan nasabah membatalkan usulan yang masih menunggu.
+
+Pengajuan transaksi yang sudah dibuat tetap menggunakan snapshot data nasabah sebelumnya. Pengajuan baru setelah persetujuan menggunakan data yang telah diperbarui. Endpoint perubahan nomor HP juga masuk antrean BOH dan tidak memperbarui master secara langsung. Startup menambahkan tabel usulan dan nomor revisi master tanpa menghapus data lama. Fitur ini menggunakan akun BOH yang sudah tersedia; tidak membuat atau mengubah akun produksi.
