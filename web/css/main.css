@@ -224,3 +224,8 @@ dialog:has(.customer-change-comparison) { max-width: 720px; }
 
 .submission-filters .date-picker > summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .submission-filters .date-picker > summary svg { flex-shrink: 0; }
+
+dialog:has(.logout-message) .dialog-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+dialog:has(.logout-message) .dialog-footer > .btn { width: 100%; min-width: 0; min-height: 46px; justify-content: center; }
+dialog:has(.logout-message) #dialog-confirm { background: #dc2626; border-color: #dc2626; color: #fff; }
+dialog:has(.logout-message) #dialog-confirm:hover { background: #b91c1c; border-color: #b91c1c; }
