@@ -125,7 +125,9 @@ Surat ini merupakan bukti selesainya alur persetujuan, bukan bukti eksekusi tran
 
 ### Edit data nasabah dengan persetujuan BOH
 
-SOL memilih **Data nasabah → Edit**, mengubah nama, nomor rekening, jabatan, email, atau nomor HP, lalu mengisi alasan dan memilih **Ajukan ke BOH**. CIF tetap menjadi identitas nasabah. Usulan masuk ke menu **Pembaruan nasabah** pada SOL dan BOH; jumlah yang menunggu ditampilkan pada navigasi dan diperbarui otomatis.
+Saat mode Edit aktif, tombol atas menjadi **Batal — Edit — Tambah nasabah**. Saat mode Hapus aktif, tombol menjadi **Batal — Hapus — Tambah nasabah**. Memilih nasabah dalam mode Hapus langsung membuka konfirmasi dan kolom password SOL; data belum dihapus sebelum konfirmasi dikirim.
+
+SOL memilih **Data Nasabah → Edit**, lalu memilih nasabah untuk langsung membuka formulir. SOL mengubah nama, nomor rekening, jabatan, email, atau nomor HP, lalu mengisi alasan dan memilih **Ajukan ke BOH**. CIF tetap menjadi identitas nasabah. Usulan masuk ke menu **Update data** pada SOL dan BOH; jumlah yang menunggu ditampilkan pada navigasi dan diperbarui otomatis.
 
 BOH memilih **Periksa** untuk membandingkan data sebelumnya dan usulan SOL. **Setujui perubahan** memperbarui master nasabah secara atomik; **Tolak** wajib disertai catatan dan mempertahankan data lama. Pemohon, alasan, data sebelum/sesudah, keputusan, catatan, dan waktu tersimpan dalam riwayat. Satu nasabah hanya memiliki satu usulan yang menunggu persetujuan. Data yang berubah sejak pengajuan mencegah persetujuan usulan lama; penghapusan nasabah membatalkan usulan yang masih menunggu.
 
