@@ -116,7 +116,9 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 
 /* Dashboard and lists share one filter row and one table treatment. */
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
-.stat { padding: 20px; }
+.stat { padding: 20px; text-align: left; transition: border-color .15s, background .15s; }
+.stat:hover { border-color: var(--green); background: #f8fbff; }
+.stat-label, .stat-value { display: block; }
 .stat-label { color: var(--muted); font-size: var(--text-size); }
 .stat-label strong { font-weight: 500; }
 .stat-value { margin-top: 12px; font-size: var(--page-title-size); font-weight: 700; line-height: 1.15; color: var(--green); font-variant-numeric: tabular-nums; }
@@ -202,8 +204,8 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .upload-area.has-file { border-style: solid; border-color: #307fe2; }
 .upload-area.has-file .file-status { color: var(--green); }
 .form-bottom { padding: 24px; display: grid; gap: 20px; }
-.form-submit { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.form-submit > .btn { min-width: 220px; }
+.form-submit { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.form-submit > .btn { min-width: 220px; max-width: 100%; }
 
 /* Detail: information across the page; decision and audit start on one row. */
 .status-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding: 0; margin: 0 0 24px; list-style: none; }
@@ -345,6 +347,8 @@ dialog::backdrop { background: #10223f70; }
 .dialog-footer { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; padding: 20px 24px; border-top: 1px solid var(--line); }
 .dialog-footer .btn { width: 100%; white-space: normal; }
 dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); }
+dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
+.kpi-detail .submission-table { min-width: 600px; }
 .customer-delete-list { display: grid; gap: 12px; margin-top: 20px; }
 .customer-delete-item { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; display: grid; gap: 12px; }
 .customer-delete-item > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
@@ -427,8 +431,7 @@ dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); 
   .section-title p { font-size: var(--text-size); }
   .customer-options button { align-items: flex-start; flex-direction: column; gap: 4px; }
   .upload-area { padding: 20px; }
-  .form-submit { align-items: stretch; flex-direction: column; gap: 12px; }
-  .form-submit .btn { width: 100%; min-width: 0; }
+  .form-submit .btn { min-width: min(220px, 100%); }
   .status-flow { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .status-step { grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 12px 0; gap: 12px; border-bottom-width: 1px; }
   .status-step-description { margin-left: 0; text-align: right; max-width: 140px; }
