@@ -75,7 +75,7 @@ python3 server.py
 
 Perintah `init` meminta email, nama dan password untuk petugas dan SOL. Password minimal 12 karakter dan tidak ditampilkan saat diketik. Hanya SOL yang dapat menambahkan nasabah melalui menu Data nasabah. Petugas memilih nasabah yang sudah didaftarkan SOL untuk membuat pengajuan. Data demo menggunakan `example.com`, sehingga harus diganti dengan data master yang diverifikasi untuk pengiriman nyata. Setiap pengajuan menyimpan snapshot data nasabah, bukan bergantung pada perubahan data master berikutnya.
 
-Password dapat diganti di menu Pengaturan akun. Sesi lain dicabut setelah perubahan password.
+Password dapat diganti di menu Pengaturan. Sesi lain dicabut setelah perubahan password.
 
 ## Hosting dan batas operasional
 
@@ -127,7 +127,7 @@ Surat ini merupakan bukti selesainya alur persetujuan, bukan bukti eksekusi tran
 
 Saat mode Edit aktif, tombol atas menjadi **Batal — Edit — Tambah nasabah**. Saat mode Hapus aktif, tombol menjadi **Batal — Hapus — Tambah nasabah**. Memilih nasabah dalam mode Hapus langsung membuka konfirmasi dan kolom password SOL; data belum dihapus sebelum konfirmasi dikirim.
 
-SOL memilih **Data Nasabah → Edit**, lalu memilih nasabah untuk langsung membuka formulir. SOL mengubah nama, nomor rekening, jabatan, email, atau nomor HP, lalu mengisi alasan dan memilih **Ajukan ke BOH**. CIF tetap menjadi identitas nasabah. Usulan masuk ke menu **Update data** pada SOL dan BOH; jumlah yang menunggu ditampilkan pada navigasi dan diperbarui otomatis.
+SOL memilih **Data Nasabah → Edit**, lalu memilih nasabah untuk langsung membuka formulir. SOL mengubah nama, nomor rekening, jabatan, email, atau nomor HP, lalu mengisi alasan dan memilih **Ajukan ke BOH**. CIF tetap menjadi identitas nasabah. Usulan masuk ke menu **Update Data** pada SOL dan BOH; jumlah yang menunggu ditampilkan pada navigasi dan diperbarui otomatis.
 
 BOH memilih **Periksa** untuk membandingkan data sebelumnya dan usulan SOL. **Setujui perubahan** memperbarui master nasabah secara atomik; **Tolak** wajib disertai catatan dan mempertahankan data lama. Pemohon, alasan, data sebelum/sesudah, keputusan, catatan, dan waktu tersimpan dalam riwayat. Satu nasabah hanya memiliki satu usulan yang menunggu persetujuan. Data yang berubah sejak pengajuan mencegah persetujuan usulan lama; penghapusan nasabah membatalkan usulan yang masih menunggu.
 

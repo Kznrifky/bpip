@@ -51,7 +51,6 @@ svg { width: 20px; height: 20px; flex-shrink: 0; vertical-align: middle; stroke:
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
 .card-head p { color: var(--muted); font-size: var(--text-size); margin-top: 4px; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 6px; font-size: var(--text-size); font-weight: 600; white-space: nowrap; background: #eef1f5; color: #64748b; }
-.badge:before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .badge.green, .badge.blue { background: #eaf3ff; color: var(--green); }
 .badge.amber { background: #fcf3e3; color: #93610e; }
 .badge.red, .badge.history-failure { background: #fceeee; color: #b91c1c; }
@@ -99,7 +98,7 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .profile { display: flex; align-items: center; gap: 10px; padding-top: 20px; border-top: 1px solid #ffffff30; }
 .avatar { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; background: #d9eeff; color: var(--green); font-weight: 700; font-size: 12px; }
 .profile > div:nth-child(2) { min-width: 0; }
-.profile strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.profile strong { display: block; font-size: var(--text-size); overflow-wrap: anywhere; }
 .profile small { font-size: 11px; color: #d7eaff; }
 .profile .btn { margin-left: auto; color: white; }
 .sidebar .btn.text:hover { background: #ffffff18; }
@@ -204,14 +203,15 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .form-submit > .btn { min-width: 220px; }
 
 /* Detail: information across the page; decision and audit start on one row. */
-.status-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 20px 24px; gap: 24px; margin-bottom: 24px; }
-.status-step { display: grid; justify-items: start; align-content: start; gap: 12px; font-size: var(--text-size); }
-.status-step + .status-step { padding-left: 24px; border-left: 1px solid var(--line); }
+.status-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding: 0; margin: 0 0 24px; list-style: none; }
+.status-step { display: grid; align-content: start; gap: 6px; padding: 12px 0 16px; border-bottom: 2px solid var(--line); }
 .status-step-title { display: flex; align-items: center; gap: 8px; }
-.status-step-title svg { color: #7a8fa9; width: 18px; height: 18px; }
-.status-step-title strong { font-size: var(--text-size); }
-.status-flow .badge { padding: 0; border: 0; border-radius: 0; background: none; color: var(--muted); font-weight: 400; }
-.status-flow .badge:before { display: none; }
+.status-step-title svg { color: var(--muted); width: 18px; height: 18px; }
+.status-step-title strong { font-size: var(--text-size); font-weight: 600; }
+.status-step-description { margin-left: 26px; color: var(--muted); font-size: var(--text-size); }
+.status-step.complete { border-color: #9abce8; }
+.status-step.current { border-color: var(--green); }
+.status-step.current .status-step-title, .status-step.current .status-step-title svg { color: var(--green); }
 .detail-full-layout { display: grid; gap: 24px; }
 .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
 .detail-grid strong { font-size: var(--text-size); font-weight: 600; overflow-wrap: anywhere; }
@@ -429,11 +429,9 @@ dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); 
   .upload-area .btn { width: 100%; }
   .form-submit { align-items: stretch; flex-direction: column; gap: 12px; }
   .form-submit .btn { width: 100%; min-width: 0; }
-  .status-flow { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 20px; }
-  .status-step { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-  .status-step + .status-step { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line); }
-  .status-step-title strong { font-size: var(--text-size); }
-  .status-step > .muted { width: 100%; }
+  .status-flow { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .status-step { grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 12px 0; gap: 12px; border-bottom-width: 1px; }
+  .status-step-description { margin-left: 0; text-align: right; max-width: 140px; }
   .detail-full-layout, .detail-bottom-layout { gap: 20px; }
   .sol-decision-panel .review-actions { grid-template-columns: minmax(0, 1fr); }
   .detail-meta span { display: block; }
