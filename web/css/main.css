@@ -244,3 +244,5 @@ dialog:has(.logout-message) #dialog-confirm:hover { background: #b91c1c; border-
 .detail-followup-actions > .btn { width: 100%; min-width: 0; white-space: normal; }
 .detail-followup-actions > .danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 .detail-followup-actions > .danger:hover { background: #b91c1c; border-color: #b91c1c; }
+.status-step-title { display: flex; align-items: center; gap: 10px; }
+.status-step-title > svg { flex-shrink: 0; }
