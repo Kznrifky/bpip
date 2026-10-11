@@ -210,6 +210,8 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .status-step-title { display: flex; align-items: center; gap: 8px; }
 .status-step-title svg { color: #7a8fa9; width: 18px; height: 18px; }
 .status-step-title strong { font-size: var(--text-size); }
+.status-flow .badge { padding: 0; border: 0; border-radius: 0; background: none; color: var(--muted); font-weight: 400; }
+.status-flow .badge:before { display: none; }
 .detail-full-layout { display: grid; gap: 24px; }
 .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
 .detail-grid strong { font-size: var(--text-size); font-weight: 600; overflow-wrap: anywhere; }
@@ -429,7 +431,6 @@ dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); 
   .status-step + .status-step { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .status-step-title strong { font-size: var(--text-size); }
   .status-step > .muted { width: 100%; }
-  .status-flow .badge { font-size: var(--text-size); padding: 4px 6px; }
   .detail-full-layout, .detail-bottom-layout { gap: 20px; }
   .detail-meta span { display: block; }
   .detail-meta span + span:before { content: ""; }
