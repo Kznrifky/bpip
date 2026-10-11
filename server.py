@@ -315,6 +315,7 @@ def owned_document(db, doc_id, user):
     return doc
 
 def archive_document(db, doc, user, ip, agent):
+    require(doc['customer_status'] != 'confirmed', 'Pengajuan yang sudah disetujui nasabah tidak dapat dihapus.', 409)
     db.execute('INSERT INTO archived_documents VALUES(?,?,?)', (doc['id'], now(), user['id']))
     db.execute('UPDATE versions SET expires=0 WHERE doc_id=?', (doc['id'],))
     db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND status IN ('queued','retry','failed')", (doc['id'],))
@@ -709,6 +710,8 @@ class Handler(BaseHTTPRequestHandler):
                         cancel_customer_edits(db, key, user)
                         db.execute('DELETE FROM customers WHERE cif=?',(key,))
                     else:
+                        doc = db.execute('SELECT customer_status FROM documents WHERE id=?', (key,)).fetchone()
+                        require(doc and doc['customer_status'] != 'confirmed', 'Pengajuan yang sudah disetujui nasabah tidak dapat dihapus.', 409)
                         for child in ('outbox','versions'):
                             db.execute(f'DELETE FROM {child} WHERE doc_id=?',(key,))
                         db.execute('DELETE FROM documents WHERE id=?',(key,))
@@ -829,6 +832,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat membatalkan pengajuan.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 require(doc['sol_status'] in ('pending', 'revision_requested'), 'Pengajuan dengan keputusan akhir tidak dapat dibatalkan.', 409)
+                require(doc['customer_status'] != 'confirmed', 'Pengajuan yang sudah disetujui nasabah tidak dapat dibatalkan.', 409)
                 notes = text_field(data, 'notes', 1500)
                 db.execute("UPDATE documents SET sol_status='cancelled',updated=? WHERE id=?", (now(), doc['id']))
                 db.execute('UPDATE versions SET expires=0 WHERE doc_id=?', (doc['id'],))

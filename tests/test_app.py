@@ -251,8 +251,8 @@ class WorkflowTests(unittest.TestCase):
         app.create_user('other@example.test','Other Maker','petugas','OtherMaker!2026')
         other=Client(self.url);other.call('/login',{'email':'other@example.test','password':'OtherMaker!2026'})
         self.assertEqual(other.call(route)[0],403)
-        self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})
-        self.assertEqual(self.sol.call(route)[0],404)
+        self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})[0],409)
+        self.assertEqual(self.sol.call(route)[0],200)
 
     def test_execution_pdf_images_and_unreadable_original(self):
         image=BytesIO();Image.new('RGB',(800,1200),'white').save(image,format='PNG')
@@ -406,6 +406,40 @@ class WorkflowTests(unittest.TestCase):
         doc_id=self.create();self.respond(self.token(doc_id))
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],200)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':'Uji'})[0],409)
+    def test_customer_approval_blocks_cancel_before_sol_and_after_revision_request(self):
+        doc_id = self.create()
+        self.assertEqual(self.respond(self.token(doc_id))[0], 200)
+        path = '/documents/' + doc_id
+        before = self.maker.call(path)[1]['document']
+        self.assertEqual(self.maker.call(path + '/cancel', {'version': 1, 'notes': 'Uji'})[0], 409)
+        after = self.maker.call(path)[1]['document']
+        self.assertEqual(after['customer_status'], 'confirmed')
+        self.assertEqual(after['sol_status'], 'pending')
+        self.assertEqual(after['updated'], before['updated'])
+        self.assertEqual(after['audit'], before['audit'])
+        self.assertEqual(self.sol.call(path + '/review', {'version': 1, 'decision': 'revision_requested', 'notes': 'Perbaiki surat'})[0], 200)
+        self.assertEqual(self.maker.call(path + '/cancel', {'version': 1, 'notes': 'Uji'})[0], 409)
+        self.assertEqual(self.maker.call(path + '/revise', {**DESTINATION, 'version': 1, 'kind': 'Warkat', 'nominal': 100, 'file': FILE, 'notes': 'Revisi'})[0], 200)
+        self.assertEqual(self.maker.call(path + '/cancel', {'version': 2, 'notes': 'Batalkan surat baru yang belum disetujui'})[0], 200)
+
+    def test_customer_approval_blocks_single_and_bulk_document_deletion(self):
+        pending = self.create()
+        approved = self.create()
+        self.assertEqual(self.respond(self.token(approved))[0], 200)
+        password = {'password': 'SolDemo!2026'}
+        self.assertEqual(self.sol.call('/documents/' + approved + '/archive', {**password, 'version': 1})[0], 409)
+        selection = [{'id': pending, 'version': 1}, {'id': approved, 'version': 1}]
+        self.assertEqual(self.sol.call('/documents/archive-selected', {**password, 'documents': selection})[0], 409)
+        self.assertEqual(self.sol.call('/documents/archive-all', {**password, 'ids': [pending, approved]})[0], 409)
+        self.assertEqual(self.sol.call('/documents')[1]['archived_count'], 0)
+        self.assertEqual(self.sol.call('/documents/' + pending)[0], 200)
+        self.assertEqual(self.sol.call('/documents/' + approved)[1]['document']['customer_status'], 'confirmed')
+        # Older approved records already in the archive must also retain their evidence.
+        with app.database(True) as db:
+            db.execute('INSERT INTO archived_documents VALUES(?,?,?)', (approved, app.now(), 'legacy'))
+        self.assertEqual(self.sol.call('/documents/' + approved + '/purge', {**password, 'confirmation': approved})[0], 409)
+        with app.database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM versions WHERE doc_id=?', (approved,)).fetchone()[0], 1)
     def test_selected_documents_archive_only_selection_atomically(self):
         first=self.create();second=self.create()
         first_token=self.token(first);second_token=self.token(second)
