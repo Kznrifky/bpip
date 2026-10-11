@@ -215,7 +215,6 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .detail-grid strong { font-size: var(--text-size); font-weight: 600; overflow-wrap: anywhere; }
 .detail-grid .amount { color: var(--ink); font-size: var(--text-size); line-height: 1.5; font-variant-numeric: tabular-nums; }
 .detail-info-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.detail-info-grid .amount-cell { grid-column: span 2; }
 .detail-info-grid .span-2 { grid-column: 1 / -1; }
 .detail-meta { color: var(--muted); font-size: var(--text-size); margin-bottom: 24px; }
 .detail-meta span + span:before { content: " · "; }
@@ -414,7 +413,7 @@ dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); 
   .customer-updates-head > select { width: 100%; }
   .field input, .field select, .field textarea { font-size: 16px; }
   .form-grid, .customer-summary, .detail-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  .detail-info-grid .amount-cell, .span-2 { grid-column: 1 / -1; }
+  .span-2 { grid-column: 1 / -1; }
   .customer-summary { padding: 16px; gap: 16px; }
   .section-title { margin-bottom: 20px; }
   .section-title p { font-size: var(--text-size); }
