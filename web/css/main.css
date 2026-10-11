@@ -234,10 +234,13 @@ dialog:has(.logout-message) #dialog-confirm:hover { background: #b91c1c; border-
 .customer-update-footer [data-customer-review="rejected"]:hover { background: #b91c1c; border-color: #b91c1c; }
 
 .detail-full-layout { display: grid; gap: var(--layout-gap); }
-.detail-bottom-layout { align-items: start; }
+.detail-bottom-layout { align-items: stretch; }
 .detail-bottom-layout > .card { min-width: 0; }
-.detail-email { padding-top: 20px; border-top: 1px solid var(--line); }
+.detail-bottom-layout .review-card { display: flex; flex-direction: column; }
+.detail-bottom-layout .review-card > .card-pad { flex: 1; display: flex; flex-direction: column; gap: 16px; }
+.detail-email { gap: 12px; }
 .detail-followup-actions { display: grid; gap: 12px; }
+.detail-bottom-layout .detail-followup-actions { margin-top: auto; }
 .detail-followup-actions > .btn { width: 100%; min-width: 0; white-space: normal; }
 .detail-followup-actions > .danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 .detail-followup-actions > .danger:hover { background: #b91c1c; border-color: #b91c1c; }
