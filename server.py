@@ -291,6 +291,11 @@ BRI Jakarta Sudirman 1
     db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'queued', stamp))
     add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Email: {doc['email']} · {amount}", ip, agent)
 
+def resend_available_at(db, doc):
+    mail = db.execute('SELECT created,sent_at FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
+    stamp = (mail['sent_at'] or mail['created']) if mail else doc['updated']
+    return datetime.fromisoformat(stamp).timestamp() + 24 * 60 * 60
+
 def document_summary(db, row):
     doc = dict(row)
     maker = db.execute('SELECT name FROM users WHERE id=?', (doc['maker'],)).fetchone()
@@ -299,6 +304,7 @@ def document_summary(db, row):
     doc['mail'] = dict(mail) if mail else None
     version = db.execute('SELECT filename,mime,sha256,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     doc['file'] = dict(version) if version else None
+    doc['resend_available_at'] = resend_available_at(db, doc)
     return doc
 
 def owned_document(db, doc_id, user):
@@ -851,8 +857,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Email baru hanya dapat dikirim saat menunggu nasabah.', 409)
                     previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
-                    latest_mail = db.execute('SELECT created FROM outbox WHERE doc_id=? ORDER BY created DESC LIMIT 1', (doc['id'],)).fetchone()
-                    require(time.time() - datetime.fromisoformat(latest_mail['created']).timestamp() >= 60, 'Tunggu satu menit sebelum mengirim email baru.', 429)
+                    require(time.time() >= resend_available_at(db, doc), 'Kirim ulang tersedia 24 jam setelah pengiriman email terakhir.', 429)
                     upload = (previous['filename'], previous['mime'], previous['content'], previous['sha256'])
                     notes = 'Tautan sebelumnya dibatalkan. Email baru diterbitkan.'
                     db.execute('UPDATE documents SET version=version+1,updated=? WHERE id=?', (now(), doc['id']))

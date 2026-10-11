@@ -529,6 +529,46 @@ class WorkflowTests(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'wrong'})[0],403)
         self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'SolDemo!2026'})[0],429)
+    def test_resend_waits_24_hours_and_restarts_after_each_send(self):
+        doc_id = self.create()
+        path = '/documents/' + doc_id
+        original_token = self.token(doc_id)
+        original = self.maker.call(path)[1]['document']
+        self.assertGreater(original['resend_available_at'], time.time() + 86300)
+        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 429)
+        with app.database(True) as db:
+            nearly = app.datetime.fromtimestamp(time.time() - 86400 + 60, app.timezone.utc).isoformat()
+            db.execute('UPDATE outbox SET created=? WHERE doc_id=?', (nearly, doc_id))
+        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 429)
+        unchanged = self.maker.call(path)[1]['document']
+        self.assertEqual(unchanged['version'], 1)
+        self.assertEqual(len(unchanged['versions']), 1)
+        self.assertEqual(self.token(doc_id), original_token)
+        with app.database(True) as db:
+            boundary = app.datetime.fromtimestamp(time.time() - 86400, app.timezone.utc).isoformat()
+            db.execute('UPDATE outbox SET created=? WHERE doc_id=?', (boundary, doc_id))
+        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 200)
+        updated = self.maker.call(path)[1]['document']
+        self.assertEqual(updated['version'], 2)
+        self.assertEqual(len(updated['versions']), 2)
+        self.assertNotEqual(self.token(doc_id), original_token)
+        self.assertEqual(self.respond(original_token)[0], 410)
+        self.assertEqual(self.maker.call(path + '/resend', {'version': 2})[0], 429)
+        self.assertEqual(self.maker.call(path + '/cancel', {'version': 2, 'notes': 'Pembatalan oleh petugas'})[0], 200)
+
+    def test_resend_waits_from_actual_email_delivery(self):
+        doc_id = self.create()
+        path = '/documents/' + doc_id
+        with app.database(True) as db:
+            created = app.datetime.fromtimestamp(time.time() - 172800, app.timezone.utc).isoformat()
+            sent = app.datetime.fromtimestamp(time.time() - 3600, app.timezone.utc).isoformat()
+            db.execute('UPDATE outbox SET created=?,sent_at=? WHERE doc_id=?', (created, sent, doc_id))
+        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 429)
+        with app.database(True) as db:
+            sent = app.datetime.fromtimestamp(time.time() - 86400, app.timezone.utc).isoformat()
+            db.execute('UPDATE outbox SET sent_at=? WHERE doc_id=?', (sent, doc_id))
+        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 200)
+
     def test_expired_links_validation_and_resend(self):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'confirmed','acknowledged':False})[0],400)
