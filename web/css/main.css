@@ -246,9 +246,8 @@ dialog:has(.logout-message) #dialog-confirm:hover { background: #b91c1c; border-
 .detail-followup-actions > .danger:hover { background: #b91c1c; border-color: #b91c1c; }
 .status-step-title { display: flex; align-items: center; gap: 10px; }
 .status-step-title > svg { flex-shrink: 0; }
-.detail-bottom-layout:has(.sol-decision-card) { grid-template-columns: minmax(0, 1fr) 380px; }
-.sol-decision-card .review-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: auto; }
-.sol-decision-card .review-actions > .primary { grid-column: 1 / -1; }
+.detail-bottom-layout:has(.sol-decision-card) { grid-template-columns: 380px minmax(0, 1fr); }
+.sol-decision-card .review-actions { grid-template-columns: 1fr; gap: 12px; }
 .sol-decision-card .review-actions > .btn { min-height: 46px; padding: 10px; white-space: normal; }
 .sol-decision-card .review-actions > .danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 .sol-decision-card .review-actions > .danger:hover { background: #b91c1c; border-color: #b91c1c; }
