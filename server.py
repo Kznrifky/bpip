@@ -900,7 +900,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Tautan baru hanya dapat dibuat saat menunggu nasabah.', 409)
                     previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
-                    require(time.time() >= resend_available_at(db, doc), 'Kirim ulang tersedia 24 jam setelah konfirmasi terakhir dibuat atau dikirim.', 429)
+                    require(time.time() >= resend_available_at(db, doc) or previous['expires'] <= time.time(), 'Kirim ulang tersedia setelah 24 jam atau saat tautan sudah kedaluwarsa.', 429)
                     upload = (previous['filename'], previous['mime'], previous['content'], previous['sha256'])
                     notes = 'Tautan sebelumnya dibatalkan. Tautan konfirmasi baru diterbitkan.'
                     db.execute('UPDATE documents SET version=version+1,updated=? WHERE id=?', (now(), doc['id']))

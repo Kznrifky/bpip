@@ -732,6 +732,23 @@ class WorkflowTests(unittest.TestCase):
             db.execute('UPDATE outbox SET sent_at=? WHERE doc_id=?', (sent, doc_id))
         self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 200)
 
+    def test_resend_accepts_expired_link_before_24_hours_for_all_channels(self):
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+        for channel in ('email','whatsapp','both'):
+            with self.subTest(channel=channel):
+                doc=self.create();old_token=self.token(doc)
+                self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':channel})[0],429)
+                with app.database(True) as db:
+                    db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc))
+                status,result,_=self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':channel})
+                self.assertEqual(status,200,result)
+                new_token=self.token(doc)
+                self.assertNotEqual(new_token,old_token)
+                self.assertEqual(self.customer.call('/portal',{'token':old_token})[0],410)
+                self.assertEqual(self.customer.call('/portal',{'token':new_token})[0],200)
+                self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':2,'channel':channel})[0],429)
+
     def test_expired_links_validation_and_resend(self):
         doc_id=self.create();token=self.token(doc_id)
         self.assertEqual(self.customer.call('/portal/decision',{'token':token,'decision':'confirmed','acknowledged':False})[0],400)
