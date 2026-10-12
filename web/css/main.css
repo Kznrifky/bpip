@@ -171,7 +171,7 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .customer-row-selected { background: var(--pale) !important; }
 .customer-table tr[data-customer-pick]:focus-visible { outline-offset: -3px; }
 .customer-updates-head > select { width: 180px; }
-.customer-updates-table { min-width: 820px; }
+.customer-updates-table { min-width: 720px; }
 .customer-updates-table th:last-child, .customer-updates-table td:last-child { text-align: center; }
 .customer-change-comparison { table-layout: fixed; }
 .customer-change-comparison th, .customer-change-comparison td { padding: 12px; }
@@ -262,7 +262,8 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .audit-older .timeline { padding: 24px 0 0; }
 .execution-output { display: flex; justify-content: space-between; align-items: center; gap: 24px; background: var(--pale); margin-bottom: 24px; }
 .execution-output p { margin-top: 6px; font-size: var(--text-size); color: var(--muted); }
-.settings-card { max-width: 640px; }
+.settings-card { width: 100%; }
+.settings-actions .btn { width: 100%; min-height: 48px; }
 .settings-lock { display: grid; place-items: center; width: 36px; height: 36px; color: var(--green); background: var(--pale); border-radius: 8px; }
 .archive-row { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--line); }
 .archive-row:last-child { border: 0; }
@@ -320,7 +321,7 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 /* Calendar and dialogs. */
 .table-head-tools, .date-picker { width: 100%; min-width: 0; }
 .date-picker { position: relative; }
-.date-picker > summary { width: 100%; list-style: none; color: var(--green); min-height: 44px; font-size: var(--text-size); }
+.date-picker > summary { width: 100%; list-style: none; color: var(--green); min-height: 44px; padding: 10px 12px; font-size: var(--text-size); }
 .date-picker > summary::-webkit-details-marker { display: none; }
 .date-picker > summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .date-picker > summary.active { background: var(--pale); border-color: #9abce8; }
