@@ -156,10 +156,10 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .selection-actions { flex-wrap: nowrap; }
 .selection-actions .btn { min-width: 100px; }
 .customers-card-head { flex-wrap: wrap; }
-.customers-card-head .selection-actions { margin-left: auto; }
+.customers-card-head .selection-actions { margin-left: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; width: min(100%, 540px); gap: 12px; }
+.customers-card-head .selection-actions .btn { width: 100%; min-width: 0; min-height: 48px; padding: 10px 12px; white-space: normal; }
 .customers-card-head h1 { font-size: var(--page-title-size); }
-.customer-filters { grid-template-columns: minmax(0, 1fr) auto; }
-.customer-selection-count { color: var(--green); font-size: var(--text-size); }
+.customer-filters { grid-template-columns: minmax(0, 1fr); }
 .customer-select { width: 44px; text-align: center !important; }
 .customer-select input { width: 18px; height: 18px; margin: 0; accent-color: var(--green); cursor: pointer; }
 .customer-select input:disabled { opacity: .45; }
@@ -364,7 +364,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 @media (max-width: 1200px) {
   .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .filters > .search-box { grid-column: 1 / -1; }
-  .filters:has(#history-search), .customer-filters { grid-template-columns: minmax(0, 1fr) auto; }
+  .filters:has(#history-search), .customer-filters { grid-template-columns: minmax(0, 1fr); }
   .filters:has(#history-search) > .search-box, .customer-filters > .search-box { grid-column: auto; }
   .detail-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -423,6 +423,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
   .customers-card-head .selection-actions { width: 100%; margin: 8px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .selection-actions .btn { min-width: 0; min-height: 48px; white-space: normal; font-size: var(--text-size); padding-inline: 8px; }
   .selection-actions .btn svg { width: 16px; height: 16px; }
+  .customers-card-head .selection-actions .btn { padding: 8px; }
   .customer-updates-head > select { width: 100%; }
   .field input, .field select, .field textarea { font-size: 16px; }
   .form-grid, .customer-summary, .detail-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
