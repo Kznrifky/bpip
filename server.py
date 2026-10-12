@@ -20,14 +20,14 @@ import ssl
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 from email.policy import SMTP
 from email.utils import formataddr, formatdate, parseaddr
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 from execution_report import build_execution_report, ReportError
 
 ROOT = Path(__file__).resolve().parent
@@ -252,7 +252,12 @@ def cancel_customer_edits(db, cif, user):
 def add_audit(db, doc, action, actor, notes='', ip='', agent=''):
     db.execute('INSERT INTO audit(doc_id,version,action,actor,notes,at,ip,agent) VALUES(?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], action, actor, notes, now(), ip, agent[:300]))
 
-def enqueue(db, doc, upload, actor, ip, agent):
+def enqueue(db, doc, upload, actor, ip, agent, channel='email'):
+    require(channel in ('email', 'whatsapp', 'both'), 'Pilih Email, WhatsApp, atau Keduanya.')
+    if channel != 'email':
+        customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
+        require(customer is not None and customer['phone'], 'Nomor HP nasabah belum tersedia. Pilih Email atau minta SOL melengkapi nomor HP.')
+        valid_phone(customer['phone'])
     token = secrets.token_urlsafe(32)
     stamp = now()
     expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
@@ -288,13 +293,42 @@ Terima kasih atas perhatian dan konfirmasi Anda.
 Hormat kami,
 BRI Jakarta Sudirman 1
 """
-    db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'queued', stamp))
-    add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Email: {doc['email']} · {amount}", ip, agent)
+    # A manual-only row preserves the private link but is never processed by the email worker.
+    db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'whatsapp_manual' if channel == 'whatsapp' else 'queued', stamp))
+    delivery = {'email': 'Email', 'whatsapp': 'WhatsApp manual', 'both': 'Email dan WhatsApp manual'}[channel]
+    add_audit(db, doc, 'Konfirmasi WhatsApp disiapkan' if channel == 'whatsapp' else 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Kanal: {delivery} · {amount}", ip, agent)
+    return whatsapp_preview(db, doc) if channel != 'email' else None
 
 def resend_available_at(db, doc):
     mail = db.execute('SELECT created,sent_at FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
     stamp = (mail['sent_at'] or mail['created']) if mail else doc['updated']
     return datetime.fromisoformat(stamp).timestamp() + 24 * 60 * 60
+
+def whatsapp_preview(db, doc):
+    require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'WhatsApp tersedia saat pengajuan masih menunggu respons nasabah.', 409)
+    version = db.execute('SELECT token_hash,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
+    require(version is not None and not version['used_at'] and version['expires'] > time.time(), 'Tautan sudah tidak berlaku. Kirim tautan baru terlebih dahulu.', 409)
+    customer = db.execute('SELECT phone FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (doc['cif'],)).fetchone()
+    require(customer is not None and customer['phone'], 'Nomor HP nasabah belum tersedia. Minta SOL melengkapi data nasabah.')
+    phone = valid_phone(customer['phone'])
+    phone = '62' + phone[1:] if phone.startswith('0') else phone.lstrip('+')
+    mail = db.execute('SELECT body FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
+    # Reuse the email's current token; opening this preview never renews a link.
+    match = re.search(r'/#confirm/([A-Za-z0-9_-]+)', mail['body']) if mail else None
+    require(match is not None and hmac.compare_digest(digest(match[1]), version['token_hash']), 'Tautan konfirmasi tidak tersedia. Kirim tautan baru terlebih dahulu.', 409)
+    link = BASE_URL + '/#confirm/' + match[1]
+    expires = datetime.fromtimestamp(version['expires'], timezone(timedelta(hours=7))).strftime('%d/%m/%Y %H:%M')
+    message = f"""Yth. {doc['customer_name']},
+
+Mohon periksa dan konfirmasi surat {doc['id']} melalui tautan berikut:
+{link}
+
+Tautan pribadi ini berlaku hingga {expires} WIB dan hanya dapat digunakan untuk satu keputusan.
+BRI VISTA tidak meminta PIN, kata sandi, atau OTP.
+
+Terima kasih,
+BRI VISTA"""
+    return {'phone': phone, 'message': message, 'url': 'https://wa.me/' + phone + '?text=' + quote(message, safe=''), 'expires': version['expires']}
 
 def document_summary(db, row):
     doc = dict(row)
@@ -511,7 +545,7 @@ class Handler(BaseHTTPRequestHandler):
     def get_route(self):
         path = urlsplit(self.path).path
         if path == '/api/config':
-            return self.respond({'demo': DEMO, 'mail_mode': MAIL_MODE, 'bank_name': BANK_NAME})
+            return self.respond({'demo': DEMO, 'mail_mode': MAIL_MODE, 'bank_name': BANK_NAME, 'whatsapp_manual': True})
         if path == '/api/session':
             with database() as db:
                 user = self.session(db)
@@ -558,6 +592,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(content)
                     return
+                whatsapp = re.fullmatch(r'/api/documents/([^/]+)/whatsapp-preview', path)
+                if whatsapp:
+                    require(user['role'] == 'petugas', 'Hanya Officer yang dapat menyiapkan pesan WhatsApp.', 403)
+                    doc = owned_document(db, whatsapp[1], user)
+                    return self.respond(whatsapp_preview(db, doc))
                 historic = re.fullmatch(r'/api/documents/([^/]+)/versions/([0-9]+)/file', path)
                 if historic:
                     doc = owned_document(db, historic[1], user)
@@ -575,7 +614,7 @@ class Handler(BaseHTTPRequestHandler):
                     result['versions'] = [dict(r) for r in db.execute('SELECT version,filename,sha256,nominal,created,destination_account,destination_name FROM versions WHERE doc_id=? ORDER BY version DESC', (doc['id'],))]
                     return self.respond({'document': result})
                 if path == '/api/outbox' and MAIL_MODE == 'console' and not PRODUCTION:
-                    rows = db.execute('SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id ORDER BY o.created DESC') if user['role'] == 'sol' else db.execute('SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE d.maker=? ORDER BY o.created DESC', (user['id'],))
+                    rows = db.execute("SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE o.status!='whatsapp_manual' ORDER BY o.created DESC") if user['role'] == 'sol' else db.execute("SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE d.maker=? AND o.status!='whatsapp_manual' ORDER BY o.created DESC", (user['id'],))
                     return self.respond({'messages': [dict(r) for r in rows]})
             raise AppError(404, 'Halaman tidak ditemukan.')
         allowed = {'/': 'index.html', '/index.html': 'index.html', '/css/main.css': 'css/main.css', '/js/app.js': 'js/app.js'}
@@ -816,9 +855,9 @@ class Handler(BaseHTTPRequestHandler):
                 values = (doc_id, customer['cif'], customer['name'], customer['account'], customer['person'], customer['email'], kind, nominal, description, user['id'], 1, 'pending', 'pending', '', stamp, stamp, destination_account, destination_name)
                 db.execute('INSERT INTO documents(id,cif,customer_name,account,person,email,kind,nominal,description,maker,version,customer_status,sol_status,sol_notes,created,updated,destination_account,destination_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
-                enqueue(db, doc, upload, user['name'], ip, agent)
+                preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
                 db.commit()
-                return self.respond({'id': doc_id}, 201)
+                return self.respond({'id': doc_id, 'whatsapp': preview}, 201)
             match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|cancel|archive)', path)
             require(match is not None, 'Endpoint tidak ditemukan.', 404)
             doc = owned_document(db, match[1], user)
@@ -859,16 +898,18 @@ class Handler(BaseHTTPRequestHandler):
                     notes = text_field(data, 'notes', 1500)
                     db.execute("UPDATE documents SET kind=?,nominal=?,description=?,destination_account=?,destination_name=?,version=version+1,customer_status='pending',sol_status='pending',sol_notes='',updated=? WHERE id=?", (kind, nominal, description, destination_account, destination_name, now(), doc['id']))
                 else:
-                    require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Email baru hanya dapat dikirim saat menunggu nasabah.', 409)
+                    require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Tautan baru hanya dapat dibuat saat menunggu nasabah.', 409)
                     previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
-                    require(time.time() >= resend_available_at(db, doc), 'Kirim ulang tersedia 24 jam setelah pengiriman email terakhir.', 429)
+                    require(time.time() >= resend_available_at(db, doc), 'Kirim ulang tersedia 24 jam setelah konfirmasi terakhir dibuat atau dikirim.', 429)
                     upload = (previous['filename'], previous['mime'], previous['content'], previous['sha256'])
-                    notes = 'Tautan sebelumnya dibatalkan. Email baru diterbitkan.'
+                    notes = 'Tautan sebelumnya dibatalkan. Tautan konfirmasi baru diterbitkan.'
                     db.execute('UPDATE documents SET version=version+1,updated=? WHERE id=?', (now(), doc['id']))
                 db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND status IN ('queued','retry','failed')", (doc['id'],))
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc['id'],)).fetchone()
-                add_audit(db, doc, 'Petugas mengunggah revisi surat' if operation == 'revise' else 'Petugas meminta email konfirmasi baru', user['name'], notes, ip, agent)
-                enqueue(db, doc, upload, user['name'], ip, agent)
+                add_audit(db, doc, 'Petugas mengunggah revisi surat' if operation == 'revise' else 'Petugas meminta tautan konfirmasi baru', user['name'], notes, ip, agent)
+                preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
+                db.commit()
+                return self.respond({'ok': True, 'id': doc['id'], 'whatsapp': preview})
             db.commit()
             return self.respond({'ok': True, 'id': doc['id']})
 

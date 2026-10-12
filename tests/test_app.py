@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPCookieProcessor
+from urllib.parse import urlsplit, parse_qs
 from unittest.mock import patch
 from pypdf import PdfReader
 from reportlab.pdfgen import canvas
@@ -295,6 +296,134 @@ class WorkflowTests(unittest.TestCase):
         return row['body'].split('/#confirm/')[1].split()[0]
     def respond(self, token, decision='confirmed'):
         return self.customer.call('/portal/decision',{'token':token,'decision':decision,'notes':'Tidak sesuai' if decision=='rejected' else '', 'acknowledged':True})
+
+    def test_delivery_channel_email_whatsapp_and_both(self):
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+        for channel in ('whatsapp', 'email', 'both'):
+            with self.subTest(channel=channel):
+                status,result,_=self.maker.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE,'channel':channel})
+                self.assertEqual(status,201,result)
+                doc=result['id']
+                with app.database() as db:
+                    row=db.execute('SELECT * FROM outbox WHERE doc_id=?',(doc,)).fetchone()
+                self.assertEqual(row['status'],'whatsapp_manual' if channel=='whatsapp' else 'queued')
+                if channel=='whatsapp':
+                    self.assertFalse(app.deliver_one())
+                    messages=self.maker.call('/outbox')[1]['messages']
+                    self.assertFalse(any(m['doc_id']==doc for m in messages))
+                else:
+                    self.assertTrue(app.deliver_one())
+                if channel=='email':
+                    self.assertIsNone(result['whatsapp'])
+                else:
+                    self.assertEqual(result['whatsapp']['phone'],'6281234567890')
+                    self.assertIn(self.token(doc),result['whatsapp']['message'])
+                    self.assertEqual(self.respond(self.token(doc))[0],200)
+                    self.assertEqual(self.maker.call('/documents/'+doc+'/whatsapp-preview')[0],409)
+
+    def test_delivery_channel_invalid_or_missing_phone_rolls_back(self):
+        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE}
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='' WHERE cif='1234567'")
+        for channel in ('sms','whatsapp','both',None):
+            self.assertEqual(self.maker.call('/documents',{**payload,'channel':channel})[0],400)
+        with app.database() as db:
+            for table in ('documents','versions','outbox'):
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0)
+        self.assertEqual(self.maker.call('/documents',{**payload,'channel':'email'})[0],201)
+
+    def test_delivery_channel_resend_and_revision(self):
+        doc=self.create()
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+            db.execute("UPDATE outbox SET created='2020-01-01T00:00:00+00:00' WHERE doc_id=?",(doc,))
+        old_token=self.token(doc)
+        result=self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'whatsapp'})
+        self.assertEqual(result[0],200,result[1])
+        self.assertIn(self.token(doc),result[1]['whatsapp']['message'])
+        self.assertNotEqual(self.token(doc),old_token)
+        self.assertEqual(self.respond(old_token)[0],410)
+        self.assertFalse(app.deliver_one())
+        self.respond(self.token(doc))
+        self.sol.call('/documents/'+doc+'/review',{'version':2,'decision':'revision_requested','notes':'Perbaiki surat'})
+        result=self.maker.call('/documents/'+doc+'/revise',{**DESTINATION,'version':2,'kind':'Standing Instruction','nominal':2,'notes':'Diperbaiki','file':FILE,'channel':'both'})
+        self.assertEqual(result[0],200,result[1])
+        self.assertIn(self.token(doc),result[1]['whatsapp']['message'])
+        self.assertTrue(app.deliver_one())
+
+    def test_whatsapp_preview_reuses_token_without_sending_or_renewing(self):
+        doc=self.create();token=self.token(doc)
+        with app.database() as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+            before={table:[tuple(row) for row in db.execute('SELECT * FROM '+table)] for table in ('versions','outbox','audit')}
+        route='/documents/'+doc+'/whatsapp-preview'
+        status,preview,_=self.maker.call(route)
+        self.assertEqual(status,200,preview)
+        self.assertEqual(preview['phone'],'6281234567890')
+        self.assertIn(app.BASE_URL+'/#confirm/'+token,preview['message'])
+        self.assertNotIn(DESTINATION['destination_account'],preview['message'])
+        self.assertNotIn('CIF',preview['message'])
+        url=urlsplit(preview['url'])
+        self.assertEqual((url.scheme,url.netloc,url.path),('https','wa.me','/6281234567890'))
+        self.assertEqual(parse_qs(url.query)['text'],[preview['message']])
+        with app.database() as db:
+            after={table:[tuple(row) for row in db.execute('SELECT * FROM '+table)] for table in before}
+        self.assertEqual(before,after)
+        self.assertEqual(self.respond(token)[0],200)
+        self.assertEqual(self.maker.call(route)[0],409)
+        self.assertEqual(self.respond(token)[0],410)
+
+    def test_whatsapp_preview_enforces_roles_ownership_and_current_link(self):
+        doc=self.create();route='/documents/'+doc+'/whatsapp-preview'
+        app.create_user('other@example.test','Other Officer','petugas','OtherOfficer!2026')
+        other=Client(self.url)
+        other.call('/login',{'email':'other@example.test','password':'OtherOfficer!2026'})
+        self.assertEqual(other.call(route)[0],403)
+        self.assertEqual(self.sol.call(route)[0],403)
+        self.assertEqual(self.boh_client().call(route)[0],403)
+        self.assertEqual(self.customer.call(route)[0],401)
+        with app.database() as db:
+            db.execute("UPDATE customers SET phone='' WHERE cif='1234567'")
+        self.assertEqual(self.maker.call(route)[0],400)
+        with app.database() as db:
+            db.execute("UPDATE customers SET phone='+6281234567890' WHERE cif='1234567'")
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc))
+        self.assertEqual(self.maker.call(route)[0],409)
+        with app.database() as db:
+            db.execute('UPDATE versions SET expires=?,token_hash=? WHERE doc_id=?',(time.time()+3600,app.digest('old-token'),doc))
+        self.assertEqual(self.maker.call(route)[0],409)
+        with app.database() as db:
+            db.execute("UPDATE documents SET sol_status='cancelled' WHERE id=?",(doc,))
+        self.assertEqual(self.maker.call(route)[0],409)
+
+    def test_whatsapp_preview_uses_phone_changes_only_after_boh_approval(self):
+        doc=self.create();route='/documents/'+doc+'/whatsapp-preview'
+        with app.database() as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+        status,request,_=self.sol.call('/customers/1234567/phone',{'phone':'+6285712345678','reason':'Nomor terbaru'})
+        self.assertEqual(status,200,request)
+        self.assertEqual(self.maker.call(route)[1]['phone'],'6281234567890')
+        boh=self.boh_client()
+        self.assertEqual(boh.call('/customer-edit-requests/'+request['id']+'/review',{'decision':'approved'})[0],200)
+        self.assertEqual(self.maker.call(route)[1]['phone'],'6285712345678')
+
+    def test_whatsapp_preview_follows_resend_current_version(self):
+        doc=self.create();old_token=self.token(doc)
+        with app.database() as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+            stamp=app.datetime.fromtimestamp(time.time()-90000,app.timezone.utc).isoformat()
+            db.execute('UPDATE outbox SET created=?,sent_at=NULL WHERE doc_id=?',(stamp,doc))
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1})[0],200)
+        new_token=self.token(doc)
+        status,preview,_=self.maker.call('/documents/'+doc+'/whatsapp-preview')
+        self.assertEqual(status,200,preview)
+        self.assertIn('/#confirm/'+new_token,preview['message'])
+        self.assertNotIn(old_token,preview['message'])
+        with app.database() as db:
+            version=db.execute('SELECT expires FROM versions WHERE doc_id=? AND version=2',(doc,)).fetchone()
+        self.assertEqual(preview['expires'],version['expires'])
+
     def test_full_revision_and_approval_flow(self):
         doc_id=self.create();token1=self.token(doc_id)
         # Opening portal has no consent side effects.

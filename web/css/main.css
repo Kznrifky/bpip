@@ -344,6 +344,16 @@ dialog::backdrop { background: #10223f70; }
 .dialog-body > p + p { margin-top: 16px; }
 .dialog-body:not(.stack) > .field, .dialog-body:not(.stack) > form, .dialog-body:not(.stack) > .notice { margin-top: 20px; }
 .dialog-body .error-message:not(:empty) { margin-top: 16px; }
+.whatsapp-message { min-height: 220px; resize: vertical; }
+.delivery-picker { border: 0; padding: 0; margin: 0; min-width: 0; }
+.delivery-picker legend { font-weight: 600; margin-bottom: 12px; }
+.delivery-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.delivery-option { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; position: relative; min-height: 100px; padding: 12px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.delivery-option svg { width: 22px; height: 22px; }
+.delivery-option input { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; accent-color: var(--green); }
+.delivery-option:has(input:checked) { background: var(--pale); border-color: var(--green); color: var(--green); }
+.delivery-option:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
+.delivery-option:has(input:disabled) { opacity: .5; cursor: default; }
 .dialog-footer { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; padding: 20px 24px; border-top: 1px solid var(--line); }
 .dialog-footer .btn { width: 100%; white-space: normal; }
 dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); }
