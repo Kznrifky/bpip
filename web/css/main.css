@@ -285,13 +285,11 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .login-story footer { color: #d7eaff; font-size: var(--text-size); }
 .login-panel { display: grid; place-items: center; padding: 48px; background: var(--green); color: white; }
 .login-form { width: 380px; max-width: 100%; display: grid; gap: 24px; }
-.login-form h2 { font-size: var(--page-title-size); }
-.login-form .intro p { color: #d7eaff; margin-top: 8px; }
+.login-form .intro p { color: #d7eaff; }
 .login-form label { color: white; }
-.login-form > .btn.primary { background: white; border-color: white; color: var(--green); }
+.login-form > .btn.primary { background: white; border-color: white; color: var(--green); font-weight: 700; }
 .login-form > .btn.primary:hover { background: var(--pale); border-color: var(--pale); }
 .login-form .error-message:not(:empty) { background: #fff1f2; padding: 12px; border-radius: 8px; }
-.login-bottom { text-align: center; font-size: var(--text-size); color: #d7eaff; }
 .login-form .demo-box { color: var(--ink); }
 .demo-box { padding: 16px; background: var(--pale); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 12px; font-size: var(--text-size); }
 .demo-account { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
