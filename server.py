@@ -617,7 +617,7 @@ class Handler(BaseHTTPRequestHandler):
                     rows = db.execute("SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE o.status!='whatsapp_manual' ORDER BY o.created DESC") if user['role'] == 'sol' else db.execute("SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE d.maker=? AND o.status!='whatsapp_manual' ORDER BY o.created DESC", (user['id'],))
                     return self.respond({'messages': [dict(r) for r in rows]})
             raise AppError(404, 'Halaman tidak ditemukan.')
-        allowed = {'/': 'index.html', '/index.html': 'index.html', '/css/main.css': 'css/main.css', '/js/app.js': 'js/app.js', '/assets/bri-vista-logo-transparent.png': 'assets/bri-vista-logo-transparent.png'}
+        allowed = {'/': 'index.html', '/index.html': 'index.html', '/css/main.css': 'css/main.css', '/js/app.js': 'js/app.js', '/assets/bri-vista-logo-transparent.png': 'assets/bri-vista-logo-transparent.png', '/assets/bri-vista-login-logo.png': 'assets/bri-vista-login-logo.png'}
         require(path in allowed, 'Halaman tidak ditemukan.', 404)
         file = ROOT / 'web' / allowed[path]
         body = file.read_bytes()

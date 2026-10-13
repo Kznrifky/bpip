@@ -546,3 +546,36 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 @media (prefers-reduced-motion: reduce) {
   *, *:before, *:after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* Uploaded logo for the login page. */
+.login-logo { width: 100%; aspect-ratio: 1960 / 500; overflow: hidden; mix-blend-mode: multiply; }
+.login-logo img { display: block; width: 108.16%; max-width: none; height: auto; margin-left: -4.08%; margin-top: -6.12%; }
+/* Submission progress follows the compact card reference. */
+.status-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 28px; padding: 24px; gap: 24px; background: white; border: 1px solid var(--line); border-radius: 12px; list-style: none; }
+.status-step { position: relative; display: flex; flex-direction: row; align-items: center; gap: 12px; min-width: 0; padding: 0; border: 0; }
+.status-step:not(:last-child)::after { content: ""; position: absolute; left: auto; right: 0; top: 50%; transform: translateY(-50%); height: 32px; width: 0; background: transparent; border-right: 1px solid var(--line); }
+.status-step-marker { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: #f8fafc; font-size: 14px; font-weight: 700; }
+.status-step-marker svg { width: 17px; height: 17px; }
+.status-step.complete .status-step-marker { color: #198366; background: #ebf7f1; border-color: #d4ede2; }
+.status-step.current .status-step-marker { color: white; background: var(--green); border-color: var(--green); }
+.status-step.current .status-step-copy strong { color: var(--green); }
+.status-step-copy { display: grid; min-width: 0; padding-right: 12px; background: transparent; gap: 4px; overflow-wrap: anywhere; }
+.status-step-copy strong { font-size: 14px; font-weight: 700; }
+.status-step-copy span { font-size: 13px; color: var(--muted); }
+@media (max-width: 760px) {
+ .status-flow { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 0; }
+ .status-step { flex-direction: row; align-items: center; padding: 12px 0; gap: 12px; }
+ .status-step:not(:last-child)::after { left: 18px; right: auto; top: calc(50% + 20px); transform: none; height: 24px; }
+ .status-step-copy { padding-right: 0; }
+}
+/* Nusantara Blue sidebar, with a transparent white logo. */
+.sidebar { background: var(--green); color: white; border-right: 0; }
+.sidebar .brand-logo img { filter: brightness(0) invert(1); }
+.sidebar .nav-label { color: #c6e0ff; }
+.sidebar .nav button { color: #e5efff; }
+.sidebar .nav button:hover { background: #ffffff16; color: white; }
+.sidebar .nav button.active { background: white; color: var(--green); }
+.sidebar .profile { border-top-color: #ffffff30; }
+.sidebar .profile small { color: #d7eaff; }
+.sidebar .profile .btn { color: white; }
+.sidebar .btn.text:hover { background: #ffffff16; }
