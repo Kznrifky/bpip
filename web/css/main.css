@@ -579,3 +579,86 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .sidebar .profile small { color: #d7eaff; }
 .sidebar .profile .btn { color: white; }
 .sidebar .btn.text:hover { background: #ffffff16; }
+
+/* Dashboard theme: Nusantara Blue with quiet curved accents. */
+.nusantara-theme { --sidebar-width: clamp(248px, 17.5vw, 280px); background: #f2f7fe; color: #142f59; font-family: "Avenir Next", "Segoe UI", -apple-system, sans-serif; }
+.nusantara-theme .sidebar { width: var(--sidebar-width); padding: 32px 22px 24px; background: linear-gradient(155deg, #064594, #0756bd 65%, #034699); color: white; border: 0; isolation: isolate; overflow: hidden; }
+.nusantara-theme .sidebar::before, .nusantara-theme .sidebar::after { content: ""; position: absolute; border-radius: 50%; pointer-events: none; z-index: -1; }
+.nusantara-theme .sidebar::before { width: 470px; height: 240px; bottom: -100px; left: -150px; border: 44px solid #56a8ff16; transform: rotate(-25deg); }
+.nusantara-theme .sidebar::after { width: 360px; height: 500px; bottom: -160px; right: -270px; border: 64px solid #63b6ff19; transform: rotate(30deg); }
+.nusantara-theme .sidebar-brand { width: 100%; padding: 0; margin-bottom: 52px; }
+.sidebar-logo { width: 100%; aspect-ratio: 1960 / 500; overflow: hidden; mix-blend-mode: screen; }
+.sidebar-logo img { display: block; width: 108.16%; height: auto; max-width: none; margin-left: -4.08%; margin-top: -6.12%; filter: invert(1) hue-rotate(180deg); }
+.nusantara-theme .nav-label { color: #deecff; font-size: 14px; font-weight: 600; padding-inline: 14px; }
+.nusantara-theme .nav { gap: 10px; }
+.nusantara-theme .nav button { min-height: 54px; padding: 14px 16px; font-size: 14px; font-weight: 600; border-radius: 12px; color: #e8f2ff; }
+.nusantara-theme .nav button.active { background: white; color: #0857c3; box-shadow: 0 4px 12px #002f7520; }
+.nusantara-theme .nav button:hover { background: #ffffff16; color: white; }
+.nusantara-theme .nav button.active:hover { background: #f5faff; color: #0857c3; }
+.nusantara-theme .nav .count { background: #e9f3ff; color: #0857c3; font-size: 12px; }
+.nusantara-theme .profile { border-top-color: #ffffff24; padding-top: 20px; }
+.nusantara-theme .profile .btn { color: white; }
+.nusantara-theme .avatar { width: 44px; height: 44px; background: linear-gradient(135deg, white, #cae6ff); font-size: 14px; }
+.nusantara-theme .workspace { margin-left: var(--sidebar-width); position: relative; padding-top: 48px; background: linear-gradient(130deg, #f5f9ff, #eef5ff); min-height: 100dvh; }
+.nusantara-theme .workspace::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 48px; pointer-events: none; background: linear-gradient(155deg, transparent 45%, #d8eaff88 45%, #d8eaff88 60%, transparent 60%), linear-gradient(120deg, #eaf4ff, #f5f9ff); }
+.nusantara-theme .topbar { min-height: 64px; padding: 14px 32px; background: #ffffffed; border-bottom-color: #e4edf9; }
+.nusantara-theme .breadcrumb { color: #7587a3; }
+.nusantara-theme .breadcrumb strong { color: #193457; }
+.nusantara-theme .role-tag { border: 0; background: #e5f1ff; color: #0857c3; font-size: 12px; padding: 7px 10px; }
+.nusantara-theme .main { padding: 24px 32px; max-width: 1440px; margin-inline: auto; }
+.dashboard-theme .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-bottom: 22px; }
+.dashboard-theme .stat { display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 24px; padding: 24px 26px; min-height: 116px; border: 1px solid #e0eaf8; border-radius: 12px; background: linear-gradient(130deg, white, #f5f9ff); color: #143460; position: relative; overflow: hidden; isolation: isolate; box-shadow: 0 4px 14px #16478a05; }
+.dashboard-theme .stat::after { content: ""; position: absolute; right: -65px; bottom: -50px; width: 290px; height: 90px; border: 22px solid #cce2ff55; border-radius: 50%; transform: rotate(-25deg); z-index: -1; pointer-events: none; }
+.dashboard-theme .stat:hover { border-color: #a8c9f4; box-shadow: 0 6px 18px #16478a0d; }
+.stat-icon { display: grid; place-items: center; width: 66px; height: 66px; border-radius: 18px; background: #e4f0ff; color: #063f9c; }
+.stat-icon svg { width: 35px; height: 35px; stroke-width: 1.9; }
+.stat-content { display: grid; gap: 10px; min-width: 0; }
+.dashboard-theme .stat-label { color: #18375f; font-size: 14px; }
+.dashboard-theme .stat-label strong { font-weight: 700; }
+.dashboard-theme .stat-value { margin: 0; font-size: 30px; color: #0857c3; }
+.dashboard-theme .stat-yellow { background: linear-gradient(130deg, white, #fffbf5); }
+.dashboard-theme .stat-yellow::after { border-color: #ffe8c655; }
+.dashboard-theme .stat-yellow .stat-icon { background: #fff3e0; }
+.dashboard-theme .stat-yellow .stat-value { color: #99620c; }
+.dashboard-theme .task-link { min-height: 64px; padding: 12px 20px; margin-bottom: 24px; border-radius: 12px; background: #eaf3ff; border-color: #d7e7fb; color: #0857c3; }
+.task-copy { display: flex; align-items: center; gap: 14px; }
+.task-icon { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: #d9eaff; }
+.task-icon svg { width: 23px; height: 23px; }
+.dashboard-theme .submission-list-card { border-color: #e0e9f5; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px #16478a04; }
+.dashboard-theme .submission-list-card > .card-head { padding: 18px 28px; position: relative; overflow: hidden; isolation: isolate; background: linear-gradient(120deg, white 55%, #f1f7ff); border-bottom-color: #e7eef8; }
+.dashboard-theme .submission-list-card > .card-head::after { content: ""; position: absolute; width: 260px; height: 170px; right: -20px; bottom: -143px; border: 26px solid #d9eaff66; border-radius: 50%; transform: rotate(-22deg); z-index: -1; pointer-events: none; }
+.dashboard-theme .card-head h2 { color: #0e2b57; font-size: 20px; font-weight: 700; }
+.dashboard-theme .submission-filters { padding: 20px 28px; gap: 14px; background: white; border-bottom-color: #e5edf8; }
+.dashboard-theme .submission-filters .input, .dashboard-theme .date-picker > summary { min-height: 44px; border-color: #d9e2ef; background-color: white; border-radius: 8px; }
+.dashboard-theme .table th { background: #f3f7fc; color: #506782; font-size: 14px; }
+.dashboard-theme .table td { padding-block: 16px; color: #1c3353; border-bottom-color: #edf2f8; }
+.dashboard-theme .table tbody tr:hover { background: #f8fbff; }
+.dashboard-theme .badge { font-size: 13px; border-radius: 8px; padding: 6px 10px; }
+.dashboard-theme .record-actions .btn { border-color: #e0e6f0; border-radius: 9px; color: #102d5c; }
+@media (max-width: 1100px) and (min-width: 761px) {
+ .nusantara-theme { --sidebar-width: 224px; }
+ .nusantara-theme .sidebar { padding-inline: 16px; }
+ .dashboard-theme .stat { grid-template-columns: 48px minmax(0, 1fr); gap: 14px; padding: 20px; }
+ .stat-icon { width: 48px; height: 48px; border-radius: 14px; }
+ .stat-icon svg { width: 28px; height: 28px; }
+ .dashboard-theme .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .dashboard-theme .stats .stat:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+ .nusantara-theme .sidebar { width: 268px; padding-top: 32px; }
+ .nusantara-theme .sidebar-brand { margin-bottom: 32px; padding-right: 32px; }
+ .nusantara-theme .mobile-close { color: white !important; }
+ .nusantara-theme .workspace { margin-left: 0; padding-top: 20px; }
+ .nusantara-theme .workspace::before { height: 20px; }
+ .nusantara-theme .topbar { padding: 12px 16px; }
+ .nusantara-theme .main { padding: 20px 16px; }
+ .dashboard-theme .stats { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 18px; }
+ .dashboard-theme .stats .stat:first-child { grid-column: auto; }
+ .dashboard-theme .stat { grid-template-columns: 52px minmax(0, 1fr); min-height: 100px; gap: 20px; padding: 20px 24px; }
+ .stat-icon { width: 52px; height: 52px; border-radius: 14px; }
+ .stat-icon svg { width: 29px; height: 29px; }
+ .dashboard-theme .task-link { padding: 12px; gap: 10px; }
+ .task-copy { gap: 10px; font-size: 13px; }
+ .dashboard-theme .submission-list-card > .card-head { padding: 18px 20px; }
+ .dashboard-theme .submission-filters { padding: 16px; }
+}
