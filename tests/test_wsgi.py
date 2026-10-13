@@ -59,6 +59,13 @@ class WSGITransportTests(unittest.TestCase):
         self.assertEqual(self.request('/api/documents')['status'],401)
         self.assertEqual(self.request('/api/config',method='PUT')['status'],405)
         self.assertEqual(self.request('/../../.env')['status'],404)
+    def test_login_logo_public_asset(self):
+        response=self.request('/assets/bri-vista-logo-transparent.png')
+        self.assertEqual(response['status'],200)
+        self.assertEqual(response['headers']['Content-Type'],'image/png')
+        self.assertTrue(response['body'].startswith(b'\x89PNG\r\n\x1a\n'))
+        self.assertEqual(self.request('/assets/bri-vista-logo-transparent.png',method='HEAD')['body'],b'')
+        self.assertEqual(self.request('/assets/../server.py')['status'],404)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

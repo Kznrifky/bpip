@@ -617,13 +617,14 @@ class Handler(BaseHTTPRequestHandler):
                     rows = db.execute("SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE o.status!='whatsapp_manual' ORDER BY o.created DESC") if user['role'] == 'sol' else db.execute("SELECT o.*,d.customer_name FROM outbox o JOIN documents d ON d.id=o.doc_id WHERE d.maker=? AND o.status!='whatsapp_manual' ORDER BY o.created DESC", (user['id'],))
                     return self.respond({'messages': [dict(r) for r in rows]})
             raise AppError(404, 'Halaman tidak ditemukan.')
-        allowed = {'/': 'index.html', '/index.html': 'index.html', '/css/main.css': 'css/main.css', '/js/app.js': 'js/app.js'}
+        allowed = {'/': 'index.html', '/index.html': 'index.html', '/css/main.css': 'css/main.css', '/js/app.js': 'js/app.js', '/assets/bri-vista-logo-transparent.png': 'assets/bri-vista-logo-transparent.png'}
         require(path in allowed, 'Halaman tidak ditemukan.', 404)
         file = ROOT / 'web' / allowed[path]
         body = file.read_bytes()
         self.send_response(200)
         self.headers_common()
-        self.send_header('Content-Type', (mimetypes.guess_type(file)[0] or 'application/octet-stream') + '; charset=utf-8')
+        content_type = mimetypes.guess_type(file)[0] or 'application/octet-stream'
+        self.send_header('Content-Type', content_type + ('; charset=utf-8' if content_type.startswith('text/') else ''))
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
