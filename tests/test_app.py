@@ -453,12 +453,24 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any(a['action']=='SOL meminta revisi surat' for a in d['audit']))
         self.assertTrue(any(a['ip'] for a in d['audit']))
         self.assertEqual(self.customer.call('/documents')[0],401)
-    def test_rejected_customer_cannot_be_approved(self):
+    def test_rejected_customer_cannot_continue_to_approval_or_revision(self):
         doc_id=self.create()
         self.assertEqual(self.respond(self.token(doc_id),'rejected')[0],200)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki surat'})[0],409)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':''})[0],400)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':'Nasabah menolak surat'})[0],200)
+    def test_legacy_revision_request_cannot_reopen_customer_rejection(self):
+        doc_id=self.create()
+        self.assertEqual(self.respond(self.token(doc_id),'rejected')[0],200)
+        with app.database(write=True) as db:
+            db.execute("UPDATE documents SET sol_status='revision_requested' WHERE id=?",(doc_id,))
+        revision={**DESTINATION,'version':1,'kind':'Standing Instruction','nominal':260000000,'description':'Perbaikan surat','notes':'Surat diperbaiki','file':FILE}
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',revision)[0],409)
+        detail=self.maker.call('/documents/'+doc_id)[1]['document']
+        self.assertEqual(detail['version'],1)
+        self.assertEqual(detail['customer_status'],'rejected')
+
     def test_roles_csrf_and_ownership(self):
         doc_id=self.create()
         self.assertEqual(self.sol.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Warkat','nominal':1,'file':FILE})[0],403)

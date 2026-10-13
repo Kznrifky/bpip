@@ -34,7 +34,7 @@ Data tersimpan pada `data/bpip.sqlite3` dan bertahan saat server dimatikan. Akun
 - Petugas melihat dan memperbaiki pengajuan miliknya. SOL melihat seluruh pengajuan. Pembatasan akses diberlakukan oleh backend.
 - Nasabah tidak membutuhkan akun web; akses melalui token acak 256 bit, berumur 24 jam dan sekali keputusan. Pembukaan email/tautan tidak memberikan persetujuan otomatis.
 - Konfirmasi nasabah dan keputusan SOL merupakan dua status yang berbeda. Nasabah setuju belum berarti pengajuan telah disetujui SOL.
-- SOL dapat mereview setelah nasabah setuju **atau menolak**. Approval hanya tersedia setelah nasabah setuju. Penolakan nasabah dapat ditutup dengan penolakan SOL atau ditindaklanjuti dengan revisi.
+- SOL dapat mereview setelah nasabah setuju **atau menolak**. Approval hanya tersedia setelah nasabah setuju. Penolakan nasabah hanya dapat ditutup dengan penolakan SOL; pengajuan tidak dapat disetujui atau diminta revisi.
 - Revisi mengunggah surat baru, menyimpan versi lama, membatalkan tautan sebelumnya, dan meminta konfirmasi nasabah ulang. Keputusan akhir SOL tidak dapat diedit.
 - Kirim tautan baru tersedia saat menunggu nasabah, dengan jeda minimum satu menit. Tautan lama dibatalkan. Penerbitan tautan baru menggunakan nomor versi berikutnya untuk mengikat token ke snapshot surat.
 - Email antrean diproses worker setiap dua detik. Kegagalan mencoba ulang dengan jeda bertambah, maksimal lima percobaan. Status `sent` berarti diterima server SMTP, bukan bukti email dibaca atau masuk inbox. SMTP tidak menjamin pengiriman tepat satu kali; retry setelah koneksi terputus dapat menghasilkan email duplikat, tetapi keputusan nasabah tetap hanya sekali.

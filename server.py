@@ -885,7 +885,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(doc['sol_status'] == 'pending', 'Pengajuan ini sudah direview.', 409)
                 decision = data.get('decision')
                 require(decision in ('approved', 'rejected', 'revision_requested'), 'Keputusan tidak valid.')
-                require(decision != 'approved' or doc['customer_status'] == 'confirmed', 'SOL tidak dapat menyetujui surat yang ditolak nasabah.', 409)
+                require(decision == 'rejected' or doc['customer_status'] == 'confirmed', 'Pengajuan yang ditolak nasabah tidak dapat dilanjutkan.', 409)
                 notes = text_field(data, 'notes', 1500, decision != 'approved')
                 db.execute('UPDATE documents SET sol_status=?,sol_notes=?,updated=? WHERE id=?', (decision, notes, now(), doc['id']))
                 add_audit(db, doc, {'approved': 'SOL menyetujui pengajuan', 'rejected': 'SOL menolak pengajuan', 'revision_requested': 'SOL meminta revisi surat'}[decision], user['name'] + ' (SOL)', notes, ip, agent)
@@ -894,6 +894,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 if operation == 'revise':
                     require(doc['sol_status'] == 'revision_requested', 'Revisi hanya tersedia setelah diminta oleh SOL.', 409)
+                    require(doc['customer_status'] == 'confirmed', 'Pengajuan yang ditolak nasabah tidak dapat dilanjutkan.', 409)
                     kind, nominal, description, destination_account, destination_name = transaction_fields(data)
                     upload = read_file(data)
                     notes = text_field(data, 'notes', 1500)
