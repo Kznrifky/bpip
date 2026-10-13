@@ -116,7 +116,7 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .workspace-footer { margin-top: 24px; color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; gap: 16px; }
 
 /* Dashboard and lists share one filter row and one table treatment. */
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
 .stat { padding: 20px; text-align: left; transition: border-color .15s, background .15s; }
 .stat:hover { border-color: var(--green); background: #f8fbff; }
 .stat-label, .stat-value { display: block; }
@@ -359,6 +359,9 @@ dialog::backdrop { background: #10223f70; }
 dialog:has(.customer-change-comparison) { width: min(800px, calc(100% - 32px)); }
 dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .kpi-detail .submission-table { min-width: 600px; }
+.kpi-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kpi-filters .search-box { flex: 1 1 240px; }
+.kpi-filters select { flex: 1 1 160px; max-width: 200px; }
 .customer-delete-list { display: grid; gap: 12px; margin-top: 20px; }
 .customer-delete-item { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; display: grid; gap: 12px; }
 .customer-delete-item > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
@@ -384,11 +387,13 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
   .topbar { padding-inline: 24px; }
   .topbar-right .date { display: none; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats .stat:first-child { grid-column: 1 / -1; }
   .detail-bottom-layout { grid-template-columns: minmax(0, 1fr); }
   .detail-bottom-layout .review-card { order: -1; }
   .email-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
+  .kpi-filters select { flex-basis: 100%; max-width: none; }
   :root { --layout-gap: 16px; }
   body { font-size: var(--text-size); }
   h1 { font-size: var(--page-title-size); }

@@ -161,23 +161,31 @@ async function renderRoute() {
   else go('dashboard');
  }catch(err){main.innerHTML=errorBlock(err);if(err.status===401)renderLogin();}
 }
-const kpiLabels={total:'Total Pengajuan',pending:'Review Nasabah',review:'Review SOL',approved:'Disetujui SOL',rejected:'Ditolak SOL'};
-const kpiDocuments=(key,docs=state.documents)=>docs.filter(d=>key==='total'||finalStatus(d)===key);
+const kpiLabels={total:'Total Pengajuan',pending:'Review Nasabah',review:'Review SOL'};
+const kpiReviewLabels={pending:'Menunggu',approved:'Disetujui',rejected:'Ditolak'};
+function kpiReviewStatus(key,d) {
+ if(key==='pending')return d.customer_status==='pending'?(d.sol_status==='cancelled'?null:'pending'):{confirmed:'approved',rejected:'rejected'}[d.customer_status]||null;
+ if(key==='review')return d.sol_status==='pending'?(d.customer_status==='pending'?null:'pending'):['approved','rejected'].includes(d.sol_status)?d.sol_status:null;
+ return null;
+}
+const kpiDocuments=(key,docs=state.documents,status='pending')=>docs.filter(d=>key==='total'||kpiReviewStatus(key,d)===status);
 function dashboardCounts(docs) {
- return {...Object.fromEntries(Object.keys(kpiLabels).map(key=>[key,kpiDocuments(key,docs).length])),customerRejected:docs.filter(d=>d.customer_status==='rejected').length};
+ return Object.fromEntries(Object.keys(kpiLabels).map(key=>[key,kpiDocuments(key,docs).length]));
 }
 function viewKpi(key) {
  if(!Object.hasOwn(kpiLabels,key))return;
- const documents=kpiDocuments(key),monitoring=state.user.role==='boh';
- let page=1,query='';
- dialog.innerHTML=`<div class="kpi-detail"><div class="dialog-head"><h2 id="dialog-title">${esc(kpiLabels[key])}</h2><button class="btn text icon" data-action="close-dialog" aria-label="Tutup">${icon('close')}</button></div><div class="dialog-body stack"><p class="muted">${documents.length} pengajuan</p><div class="search-box">${icon('search')}<input id="kpi-search" class="input" type="search" aria-label="Cari detail KPI" placeholder="Cari nasabah, CIF, atau ID dokumen…"></div><div id="kpi-documents"></div></div><div class="dialog-footer"><button class="btn" data-action="close-dialog">Tutup</button></div></div>`;
+ const documents=[...state.documents],monitoring=state.user.role==='boh',stage=key!=='total';
+ let page=1,query='',status='pending';
+ dialog.innerHTML=`<div class="kpi-detail"><div class="dialog-head"><h2 id="dialog-title">${esc(kpiLabels[key])}</h2><button class="btn text icon" data-action="close-dialog" aria-label="Tutup">${icon('close')}</button></div><div class="dialog-body stack"><p id="kpi-result-count" class="muted" aria-live="polite"></p><div class="kpi-filters"><div class="search-box">${icon('search')}<input id="kpi-search" class="input" type="search" aria-label="Cari detail KPI" placeholder="Cari nasabah, CIF, atau ID dokumen…"></div>${stage?`<select id="kpi-status" class="input" aria-label="Filter status ${esc(kpiLabels[key])}">${Object.entries(kpiReviewLabels).map(([value,label])=>`<option value="${value}">${label}</option>`).join('')}</select>`:''}</div><div id="kpi-documents"></div></div><div class="dialog-footer"><button class="btn" data-action="close-dialog">Tutup</button></div></div>`;
  const draw=()=>{
-  const filtered=documents.filter(d=>`${d.customer_name} ${d.cif} ${d.id}`.toLocaleLowerCase('id-ID').includes(query));
+  const filtered=kpiDocuments(key,documents,status).filter(d=>`${d.customer_name} ${d.cif} ${d.id}`.toLocaleLowerCase('id-ID').includes(query));
+  $('#kpi-result-count').textContent=`${filtered.length} pengajuan`;
   const pages=Math.max(1,Math.ceil(filtered.length/5));page=Math.min(page,pages);
   const start=(page-1)*5,rows=filtered.slice(start,start+5);
-  $('#kpi-documents').innerHTML=rows.length?`<div class="table-wrap"><table class="table submission-table"><thead><tr><th>Nasabah / Dokumen</th><th>Nominal transaksi</th><th>Status pengajuan</th>${monitoring?'':'<th>Detail</th>'}</tr></thead><tbody>${rows.map(d=>`<tr><td><strong>${esc(d.customer_name)}</strong><small>${esc(d.id)}</small><small>CIF ${esc(d.cif)}</small></td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td>${statusBadge(d)}</td>${monitoring?'':`<td><button class="btn icon small" data-action="kpi-open-document" data-id="${esc(d.id)}" aria-label="Lihat detail ${esc(d.id)}" title="Lihat detail">${icon('eye')}</button></td>`}</tr>`).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">${start+1}–${start+rows.length} dari ${filtered.length} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman detail KPI"><button class="btn small" data-kpi-page="-1" ${page===1?'disabled':''}>Sebelumnya</button><span>${page} / ${pages}</span><button class="btn small" data-kpi-page="1" ${page===pages?'disabled':''}>Berikutnya</button></div>`:''}</div>`:empty(query?'Tidak ada pengajuan yang cocok':'Belum ada pengajuan',query?'Ubah pencarian Anda.':'Belum ada pengajuan dalam kategori ini.');
+  $('#kpi-documents').innerHTML=rows.length?`<div class="table-wrap"><table class="table submission-table"><thead><tr><th>Nasabah / Dokumen</th><th>Nominal transaksi</th><th>${stage?'Status review':'Status pengajuan'}</th>${monitoring?'':'<th>Detail</th>'}</tr></thead><tbody>${rows.map(d=>`<tr><td><strong>${esc(d.customer_name)}</strong><small>${esc(d.id)}</small><small>CIF ${esc(d.cif)}</small></td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td>${stage?badge(status,kpiReviewLabels[status]):statusBadge(d)}</td>${monitoring?'':`<td><button class="btn icon small" data-action="kpi-open-document" data-id="${esc(d.id)}" aria-label="Lihat detail ${esc(d.id)}" title="Lihat detail">${icon('eye')}</button></td>`}</tr>`).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">${start+1}–${start+rows.length} dari ${filtered.length} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman detail KPI"><button class="btn small" data-kpi-page="-1" ${page===1?'disabled':''}>Sebelumnya</button><span>${page} / ${pages}</span><button class="btn small" data-kpi-page="1" ${page===pages?'disabled':''}>Berikutnya</button></div>`:''}</div>`:empty(query?'Tidak ada pengajuan yang cocok':'Belum ada pengajuan',query?'Ubah pencarian Anda.':'Belum ada pengajuan dalam kategori ini.');
   labelRecordTables($('#kpi-documents'));
  };
+ $('#kpi-status')?.addEventListener('change',e=>{status=e.target.value;page=1;draw();});
  $('#kpi-search').addEventListener('input',e=>{query=e.target.value.trim().toLocaleLowerCase('id-ID');page=1;draw();});
  $('.kpi-detail').addEventListener('click',e=>{const button=e.target.closest('[data-kpi-page]');if(button){page+=Number(button.dataset.kpiPage);draw();}});
  draw();dialog.showModal();
@@ -188,11 +196,7 @@ function renderDashboard(full=false) {
  const newButton=boh?'':!sol?`<button class="btn primary" data-route="initiate">${icon('plus')} Tambah Pengajuan</button>`:full?`<div class="actions selection-actions">${state.documentDeleteMode?'<button class="btn" data-action="cancel-document-selection">Batal</button>':''}<button class="btn danger" id="delete-selected-documents" data-action="${state.documentDeleteMode?'archive-selected-documents':'select-documents'}" ${docs.length?'':'disabled'}>Hapus</button></div>`:'';
  const dateFilter=`<div class="table-head-tools"><details id="date-picker" class="date-picker"><summary id="date-range-trigger" class="btn ${state.dateFrom?'active':''}" aria-label="Pilih rentang tanggal pengajuan" title="${esc(rangeButtonLabel())}">${icon('calendar')}<span>${esc(rangeButtonLabel())}</span></summary><div id="date-range-panel" class="date-range-panel" role="group" aria-label="Kalender rentang tanggal"></div></details></div>`;
  const counts=dashboardCounts(docs);
- const stats=(sol||boh?[
-  ['total','Total Pengajuan','blue'],['review','Review SOL','yellow'],['approved','Disetujui SOL','green'],['rejected','Ditolak SOL','red']
- ]:[
-  ['total','Total Pengajuan','blue'],['pending','Review Nasabah','blue'],['review','Review SOL','yellow'],['approved','Disetujui SOL','green']
- ]);
+ const stats=[['total','Total Pengajuan','blue'],['pending','Review Nasabah','blue'],['review','Review SOL','yellow']];
  const updates=state.customerUpdates.filter(r=>r.status==='pending').length;
  const attention=boh?updates:sol?counts.review:count('revision_requested');
  const attentionText=boh?'update data menunggu persetujuan':sol?'pengajuan menunggu pemeriksaan':'pengajuan perlu revisi';
