@@ -304,6 +304,30 @@ def resend_available_at(db, doc):
     stamp = (mail['sent_at'] or mail['created']) if mail else doc['updated']
     return datetime.fromisoformat(stamp).timestamp() + 24 * 60 * 60
 
+def confirmation_delivery(db, doc):
+    mail = db.execute('SELECT status FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
+    whatsapp = db.execute("SELECT 1 FROM audit WHERE doc_id=? AND version=? AND (action='Konfirmasi WhatsApp disiapkan' OR notes LIKE 'Kanal: Email dan WhatsApp manual%') LIMIT 1", (doc['id'], doc['version'])).fetchone()
+    return {'email_requested': bool(mail and mail['status'] not in ('whatsapp_manual', 'cancelled')), 'whatsapp_prepared': bool(whatsapp)}
+
+def send_current_confirmation(db, doc, channel, actor, ip, agent):
+    require(channel in ('email', 'whatsapp', 'both'), 'Pilih Email, WhatsApp, atau Keduanya.')
+    require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Konfirmasi tersedia saat pengajuan masih menunggu respons nasabah.', 409)
+    version = db.execute('SELECT expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
+    require(version and not version['used_at'] and version['expires'] > time.time(), 'Tautan sudah tidak berlaku. Gunakan Kirim ulang untuk membuat tautan baru.', 409)
+    delivery = confirmation_delivery(db, doc)
+    require(channel == 'whatsapp' or not delivery['email_requested'], 'Email sudah diproses untuk link ini. Gunakan Kirim ulang setelah 24 jam atau saat link kedaluwarsa.', 409)
+    require(channel == 'email' or not delivery['whatsapp_prepared'], 'WhatsApp sudah dipilih untuk link ini. Gunakan Kirim ulang setelah 24 jam atau saat link kedaluwarsa.', 409)
+    preview = whatsapp_preview(db, doc) if channel != 'email' else None
+    if channel != 'whatsapp':
+        mail = db.execute("SELECT id FROM outbox WHERE doc_id=? AND version=? AND status='whatsapp_manual' ORDER BY created DESC LIMIT 1", (doc['id'], doc['version'])).fetchone()
+        require(mail is not None, 'Email konfirmasi tidak tersedia.', 409)
+        db.execute("UPDATE outbox SET status='queued',error='',attempts=0,next_attempt=0 WHERE id=?", (mail['id'],))
+        add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, 'Kanal: Email', ip, agent)
+    if channel != 'email':
+        add_audit(db, doc, 'Konfirmasi WhatsApp disiapkan', actor, 'Kanal: WhatsApp manual', ip, agent)
+    db.execute('UPDATE documents SET updated=? WHERE id=?', (now(), doc['id']))
+    return preview
+
 def whatsapp_preview(db, doc):
     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'WhatsApp tersedia saat pengajuan masih menunggu respons nasabah.', 409)
     version = db.execute('SELECT token_hash,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
@@ -336,6 +360,7 @@ def document_summary(db, row):
     doc['maker_name'] = maker['name'] if maker else 'Petugas'
     mail = db.execute('SELECT id,status,error,sent_at FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
     doc['mail'] = dict(mail) if mail else None
+    doc['delivery'] = confirmation_delivery(db, doc)
     version = db.execute('SELECT filename,mime,sha256,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     doc['file'] = dict(version) if version else None
     doc['resend_available_at'] = resend_available_at(db, doc)
@@ -859,11 +884,17 @@ class Handler(BaseHTTPRequestHandler):
                 preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
                 db.commit()
                 return self.respond({'id': doc_id, 'whatsapp': preview}, 201)
-            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|cancel|archive)', path)
+            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|send-confirmation|cancel|archive)', path)
             require(match is not None, 'Endpoint tidak ditemukan.', 404)
             doc = owned_document(db, match[1], user)
             operation = match[2]
-            if operation == 'archive':
+            if operation == 'send-confirmation':
+                require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat mengirim konfirmasi.', 403)
+                require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
+                preview = send_current_confirmation(db, doc, data.get('channel'), user['name'], ip, agent)
+                db.commit()
+                return self.respond({'ok': True, 'id': doc['id'], 'whatsapp': preview})
+            elif operation == 'archive':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat menghapus pengajuan.', 403)
                 verify_action_password(db,user,data)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)

@@ -297,6 +297,11 @@ function setupCustomerPicker() {
 }
 function showCustomer(c) {$('#customer-summary').innerHTML=c?`<div class="customer-summary"><div><label>Nama nasabah</label><strong>${esc(c.name)}</strong></div><div><label>Nomor rekening</label><strong>${esc(c.account)}</strong></div><div><label>Jabatan</label><strong>${esc(c.person)}</strong></div><div><label>Email penerima</label><strong>${esc(c.email)}</strong></div></div>`:'';}
 function fileBase64(file) {return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('File tidak dapat dibaca.'));reader.readAsDataURL(file);});}
+function confirmationAvailability(d) {
+ const active=d.customer_status==='pending'&&d.sol_status==='pending'&&d.file?.expires*1000>Date.now()&&!d.file?.used_at;
+ const delivery=d.delivery||{email_requested:!!d.mail&& !['whatsapp_manual','cancelled'].includes(d.mail.status),whatsapp_prepared:d.audit?.some(a=>a.version===d.version&&(a.action==='Konfirmasi WhatsApp disiapkan'||a.notes?.startsWith('Kanal: Email dan WhatsApp manual')))};
+ return {email:active&&!delivery.email_requested,whatsapp:active&&!delivery.whatsapp_prepared};
+}
 function resendIsReady(d) {return (Number.isFinite(d.resend_available_at)&&Date.now()>=d.resend_available_at*1000)||(Number.isFinite(d.file?.expires)&&Date.now()>=d.file.expires*1000);}
 function auditEntry(a,customerName) {
  const action=customerName?a.action.replace(/^Nasabah (?=(?:menyetujui|menolak) surat$)/,()=>customerName+' '):a.action;
@@ -323,17 +328,17 @@ function verificationStatus(d) {
  return {whatsapp_manual:'Link Konfirmasi siap dikirim melalui WhatsApp.',local:'Link Konfirmasi tersimpan untuk pengujian lokal.',failed:'Link Konfirmasi gagal dikirim.',retry:'Pengiriman Link Konfirmasi akan dicoba ulang.',sending:'Link Konfirmasi sedang dikirim.',queued:'Link Konfirmasi menunggu pengiriman.',cancelled:'Link Konfirmasi dinonaktifkan.'}[d.mail?.status]||'Link Konfirmasi belum tersedia.';
 }
 function renderOfficerFollowup(d) {
- const canRemove=d.customer_status!=='confirmed';const canResend=d.customer_status==='pending'&&d.sol_status==='pending';
- return `<section class="card detail-section-card review-card"><div class="card-head detail-card-head"><div class="detail-card-title"><span class="detail-card-icon blue">${icon('shield')}</span><h2>Link Verifikasi</h2></div></div><div class="card-pad stack">${d.sol_notes?notice(`<strong>Catatan SOL</strong><p>${esc(d.sol_notes)}</p>`,d.sol_status==='revision_requested'?'warn':''):''}${d.sol_status==='revision_requested'&&d.customer_status==='confirmed'?`<p class="muted">Perbaiki surat sesuai catatan SOL, lalu kirim ulang untuk konfirmasi nasabah.</p><button class="btn primary" data-route="revise/${esc(d.id)}">${icon('edit')} Unggah revisi surat</button>`:canResend?'':`<p class="muted">${d.sol_status==='cancelled'?'Pengajuan dibatalkan.':'Respons nasabah sudah tercatat.'}</p>`}<div class="detail-email stack"><div><label class="muted">Status</label><p><strong>${esc(verificationStatus(d))}</strong></p></div>${d.mail?.error?notice(esc(d.mail.error),'error'):''}</div><div class="detail-followup-actions">${state.config.whatsapp_manual&&canResend?`<button class="btn primary" data-action="send-verification">${icon('mail')} Kirim konfirmasi</button>`:''}${canRemove&&['pending','revision_requested'].includes(d.sol_status)?'<button class="btn danger" data-action="cancel-document">Batalkan pengajuan</button>':''}${canResend?`<button class="btn" data-action="resend" ${resendIsReady(d)?'':'disabled'} title="${resendIsReady(d)?'Buat tautan konfirmasi baru':`Tersedia mulai ${date(d.resend_available_at*1000)} atau saat link kedaluwarsa`}">${icon('refresh')} Kirim ulang</button>`:''}</div></div></section>`;
+ const canRemove=d.customer_status!=='confirmed';const canResend=d.customer_status==='pending'&&d.sol_status==='pending';const available=confirmationAvailability(d);const customer=state.customers.find(c=>c.cif===d.cif);const canSend=available.email||(available.whatsapp&&!!customer?.phone);
+ return `<section class="card detail-section-card review-card"><div class="card-head detail-card-head"><div class="detail-card-title"><span class="detail-card-icon blue">${icon('shield')}</span><h2>Link Verifikasi</h2></div></div><div class="card-pad stack">${d.sol_notes?notice(`<strong>Catatan SOL</strong><p>${esc(d.sol_notes)}</p>`,d.sol_status==='revision_requested'?'warn':''):''}${d.sol_status==='revision_requested'&&d.customer_status==='confirmed'?`<p class="muted">Perbaiki surat sesuai catatan SOL, lalu kirim ulang untuk konfirmasi nasabah.</p><button class="btn primary" data-route="revise/${esc(d.id)}">${icon('edit')} Unggah revisi surat</button>`:canResend?'':`<p class="muted">${d.sol_status==='cancelled'?'Pengajuan dibatalkan.':'Respons nasabah sudah tercatat.'}</p>`}<div class="detail-email stack"><div class="verification-status-row"><label class="muted">Status</label><p><strong>${esc(verificationStatus(d))}</strong></p></div>${d.mail?.error?notice(esc(d.mail.error),'error'):''}</div><div class="detail-followup-actions">${state.config.whatsapp_manual&&canResend?`<button class="btn primary" data-action="send-verification" ${canSend?'':'disabled'}>${icon('mail')} Kirim konfirmasi</button>`:''}${canRemove&&['pending','revision_requested'].includes(d.sol_status)?'<button class="btn danger" data-action="cancel-document">Batalkan pengajuan</button>':''}${canResend?`<button class="btn" data-action="resend" ${resendIsReady(d)?'':'disabled'} title="${resendIsReady(d)?'Buat tautan konfirmasi baru':`Tersedia mulai ${date(d.resend_available_at*1000)} atau saat link kedaluwarsa`}">${icon('refresh')} Kirim ulang</button>`:''}</div></div></section>`;
 }
 function sendVerification() {
- const d=state.detail;const ready=resendIsReady(d);const currentLink=d.file?.expires*1000>Date.now()&&!d.file?.used_at;
+ const d=state.detail;const available=confirmationAvailability(d);
  const customer=state.customers.find(c=>c.cif===d.cif);
+ if(!available.email&&!(available.whatsapp&&customer?.phone))return;
  showDeliveryDialog(`<p><strong>${esc(d.customer_name)}</strong><br>${esc(d.id)}</p>`,customer,async channel=>{
-  if(channel==='whatsapp'&&currentLink)return api('/documents/'+d.id+'/whatsapp-preview');
-  const result=await api('/documents/'+d.id+'/resend',{version:d.version,channel});
-  await refreshData();await renderRoute();toast(channel==='whatsapp'?'Pesan WhatsApp baru siap dikirim.':'Email baru masuk antrean.');return result.whatsapp;
- },{emailAvailable:ready,whatsappAvailable:currentLink||ready,availableAt:d.resend_available_at,renewLink:ready,reuseWhatsApp:currentLink,defaultChannel:ready?'email':'whatsapp'});
+  const result=await api('/documents/'+d.id+'/send-confirmation',{version:d.version,channel});
+  await refreshData();await renderRoute();toast(channel==='whatsapp'?'Pesan WhatsApp siap dikirim.':'Email masuk antrean.');return result.whatsapp;
+ },{emailAvailable:available.email,whatsappAvailable:available.whatsapp,availableAt:d.resend_available_at,currentDelivery:true,defaultChannel:available.email?'email':'whatsapp'});
 }
 function showWhatsAppPreview(preview) {
  dialog.innerHTML=`<div class="whatsapp-preview"><div class="dialog-head"><h2 id="dialog-title">Kirim WhatsApp</h2><button class="btn text icon" data-action="close-dialog" aria-label="Tutup">${icon('close')}</button></div><div class="dialog-body stack"><div class="field"><label for="whatsapp-phone">Nomor WhatsApp</label><input id="whatsapp-phone" value="+${esc(preview.phone)}" readonly></div><div class="field"><label for="whatsapp-message">Pratinjau pesan</label><textarea id="whatsapp-message" class="whatsapp-message" rows="14" readonly>${esc(preview.message)}</textarea></div><p class="muted">Pesan belum dikirim. Tekan Kirim setelah WhatsApp terbuka.</p></div><div class="dialog-footer"><button class="btn" data-action="copy-whatsapp-message">${icon('copy')} Salin pesan</button><a class="btn primary" href="${esc(preview.url)}" target="_blank" rel="noopener noreferrer">${icon('chat')} Buka WhatsApp</a></div></div>`;
@@ -440,7 +445,20 @@ function showDeliveryDialog(body,customer,onConfirm,options={}) {
  const available={email:options.emailAvailable!==false,whatsapp:hasPhone&&options.whatsappAvailable!==false,both:hasPhone&&options.emailAvailable!==false&&options.whatsappAvailable!==false};
  const preferred=options.defaultChannel||'email';
  const initial=available[preferred]?preferred:Object.keys(available).find(key=>available[key])||'email';
- const note=choice=>{const lines=[];if(options.emailAvailable===false)lines.push(`Email dan Keduanya tersedia mulai ${date(options.availableAt*1000)}.`);if(!hasPhone)lines.push('Nomor HP belum tersedia.');if(options.whatsappAvailable===false)lines.push('Tautan sudah kedaluwarsa.');if(available[choice]){lines.push(choice==='email'?'Email dikirim melalui sistem.':choice==='both'?'Email dikirim melalui sistem. WhatsApp dikirim manual setelah dibuka.':'WhatsApp dikirim manual setelah dibuka.');if(options.renewLink&&(choice!=='whatsapp'||!options.reuseWhatsApp))lines.push('Tautan sebelumnya akan diganti.');}return lines.join(' ');};
+ const note=choice=>{
+  const lines=[];
+  if(options.currentDelivery){
+   if(options.emailAvailable===false&&options.whatsappAvailable===false)lines.push(`Email dan WhatsApp belum bisa dikirim ulang. Gunakan Kirim ulang mulai ${date(options.availableAt*1000)} atau saat link kedaluwarsa.`);
+   else if(options.emailAvailable===false)lines.push('Email sudah diproses untuk link ini dan tidak bisa dipilih lagi.');
+   else if(options.whatsappAvailable===false)lines.push('WhatsApp sudah dipilih untuk link ini dan tidak bisa dipilih lagi.');
+  }else{
+   if(options.emailAvailable===false)lines.push(`Email dan WhatsApp belum bisa dikirim ulang. Tersedia mulai ${date(options.availableAt*1000)} atau saat link kedaluwarsa.`);
+   if(options.whatsappAvailable===false)lines.push('Tautan sudah kedaluwarsa.');
+  }
+  if(!hasPhone)lines.push('Nomor HP belum tersedia.');
+  if(available[choice]){lines.push(choice==='email'?'Email dikirim melalui sistem.':choice==='both'?'Email dikirim melalui sistem. WhatsApp dikirim manual setelah dibuka.':'WhatsApp dikirim manual setelah dibuka.');if(options.renewLink&&(choice!=='whatsapp'||!options.reuseWhatsApp))lines.push('Tautan sebelumnya akan diganti.');}
+  return lines.join(' ');
+ };
  dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">Kirim konfirmasi</h2><button class="btn text icon" data-action="close-dialog" aria-label="Tutup">${icon('close')}</button></div><div class="dialog-body stack">${body}${hasWhatsApp?`<fieldset class="delivery-picker"><legend>Kirim melalui</legend><div class="delivery-options">${[['email','Email','mail'],['whatsapp','WhatsApp','chat'],['both','Keduanya','check']].map(([value,label,symbol])=>`<label class="delivery-option"><input type="radio" name="delivery-channel" value="${value}" ${value===initial?'checked':''} ${!available[value]?'disabled':''}>${icon(symbol)}<span>${label}</span></label>`).join('')}</div></fieldset><p id="delivery-note" class="muted" aria-live="polite">${esc(note(initial))}</p>`:''}<div id="dialog-error" class="error-message" role="alert"></div></div><div class="dialog-footer"><button class="btn" data-action="close-dialog">Batal</button><button class="btn primary" id="delivery-confirm" ${!available[initial]?'disabled':''}>Lanjutkan</button></div>`;
  dialog.showModal();
  const channel=()=>$('input[name="delivery-channel"]:checked',dialog)?.value||'email';
@@ -544,7 +562,7 @@ setInterval(async()=>{
    if(before.customers!==JSON.stringify(state.customers)||before.updates!==JSON.stringify(state.customerUpdates))renderCustomerTable();
   }else if(state.route.startsWith('doc/')){
    const result=await api('/documents/'+state.detail.id);
-   if(result.document.updated!==state.detail.updated||result.document.mail?.status!==state.detail.mail?.status||result.document.resend_available_at!==state.detail.resend_available_at||($('#main [data-action="resend"]')?.disabled&&resendIsReady(result.document))){state.detail=result.document;renderDetail();}
+   if(JSON.stringify(result.document.delivery)!==JSON.stringify(state.detail.delivery)||result.document.updated!==state.detail.updated||result.document.mail?.status!==state.detail.mail?.status||result.document.resend_available_at!==state.detail.resend_available_at||($('#main [data-action="resend"]')?.disabled&&resendIsReady(result.document))){state.detail=result.document;renderDetail();}
   }
  }catch(err){if(err.status===401)renderLogin();}
 },10000);

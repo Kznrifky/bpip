@@ -352,6 +352,79 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(self.token(doc),result[1]['whatsapp']['message'])
         self.assertTrue(app.deliver_one())
 
+    def test_both_channels_lock_current_link_and_resend_resets_selection(self):
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE,'channel':'both'}
+        status,result,_=self.maker.call('/documents',payload)
+        self.assertEqual(status,201)
+        doc=result['id'];token=self.token(doc);route='/documents/'+doc+'/send-confirmation'
+        for _ in range(2):
+            self.assertEqual(self.maker.call('/documents/'+doc)[1]['document']['delivery'],{'email_requested':True,'whatsapp_prepared':True})
+        for channel in ('email','whatsapp','both'):
+            self.assertEqual(self.maker.call(route,{'version':1,'channel':channel})[0],409)
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'both'})[0],429)
+        self.assertEqual(self.token(doc),token)
+        with app.database(True) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM outbox WHERE doc_id=?',(doc,)).fetchone()[0],1)
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc))
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'email'})[0],200)
+        detail=self.maker.call('/documents/'+doc)[1]['document']
+        self.assertEqual(detail['version'],2)
+        self.assertEqual(detail['delivery'],{'email_requested':True,'whatsapp_prepared':False})
+
+    def test_add_missing_channel_reuses_link_and_blocks_duplicate_requests(self):
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE}
+        for initial,remaining in (('email','whatsapp'),('whatsapp','email')):
+            with self.subTest(initial=initial):
+                doc=self.maker.call('/documents',{**payload,'channel':initial})[1]['id'];token=self.token(doc)
+                route='/documents/'+doc+'/send-confirmation';data={'version':1,'channel':remaining}
+                self.assertEqual(self.sol.call(route,data)[0],403)
+                self.assertEqual(self.maker.call(route,data,csrf=False)[0],403)
+                self.assertEqual(self.maker.call(route,{**data,'version':2})[0],409)
+                status,result,_=self.maker.call(route,data)
+                self.assertEqual(status,200,result)
+                if remaining=='whatsapp': self.assertIn(token,result['whatsapp']['message'])
+                else: self.assertIsNone(result['whatsapp'])
+                self.assertEqual(self.token(doc),token)
+                self.assertEqual(self.maker.call(route,data)[0],409)
+                detail=self.maker.call('/documents/'+doc)[1]['document']
+                self.assertEqual(detail['version'],1)
+                self.assertEqual(detail['delivery'],{'email_requested':True,'whatsapp_prepared':True})
+                with app.database() as db:
+                    rows=list(db.execute('SELECT status FROM outbox WHERE doc_id=?',(doc,)))
+                    self.assertEqual(len(rows),1)
+                    self.assertEqual(rows[0]['status'],'queued')
+
+    def test_current_confirmation_expiry_response_and_validation(self):
+        doc=self.create();route='/documents/'+doc+'/send-confirmation';data={'version':1,'channel':'whatsapp'}
+        self.assertEqual(self.maker.call(route,{'version':1,'channel':'sms'})[0],400)
+        self.assertEqual(self.maker.call(route,data)[0],400)
+        self.assertFalse(self.maker.call('/documents/'+doc)[1]['document']['delivery']['whatsapp_prepared'])
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc))
+        self.assertEqual(self.maker.call(route,data)[0],409)
+        with app.database(True) as db:
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()+3600,doc))
+        self.assertEqual(self.respond(self.token(doc))[0],200)
+        self.assertEqual(self.maker.call(route,data)[0],409)
+
+    def test_concurrent_current_whatsapp_selection_only_records_once(self):
+        doc=self.create()
+        with app.database(True) as db:
+            db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
+        clients=[Client(self.url),Client(self.url)]
+        for client in clients: client.login('petugas')
+        route='/documents/'+doc+'/send-confirmation';payload={'version':1,'channel':'whatsapp'}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results=list(pool.map(lambda client:client.call(route,payload)[0],clients))
+        self.assertEqual(sorted(results),[200,409])
+        with app.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE doc_id=? AND action='Konfirmasi WhatsApp disiapkan'",(doc,)).fetchone()[0],1)
+
     def test_whatsapp_preview_reuses_token_without_sending_or_renewing(self):
         doc=self.create();token=self.token(doc)
         with app.database() as db:
