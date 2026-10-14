@@ -904,3 +904,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .table tr[data-document-row] { cursor: pointer; }
 .document-row-link { color: inherit; font-weight: 600; }
 .document-row-link:hover { text-decoration: underline; }
+
+/* A rejection is a failed review, distinct from a completed approval. */
+.status-step.rejected .status-step-marker { color: #cf2626; background: #fff0f0; border-color: #f3cccc; }
+.status-step.rejected .status-step-copy > span { color: #b91c1c; }

@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/js/app.js'), 'utf8');
 const context = vm.createContext({state: {documents: []}});
-for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'bindDocumentRows']) {
+for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'bindDocumentRows']) {
   const start = source.indexOf('function ' + name + '(');
   assert.ok(start >= 0, 'Missing ' + name);
   let cursor = source.indexOf('{', start), depth = 0, end;
@@ -22,6 +22,9 @@ for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiRevi
 }
 vm.runInContext(source.match(/^const kpiLabels=.*$/m)[0], context);
 vm.runInContext(source.match(/^const kpiDocuments=.*$/m)[0], context);
+vm.runInContext(source.match(/^const labels =.*$/m)[0], context);
+vm.runInContext(source.match(/^const solLabels =.*$/m)[0], context);
+context.esc = value => value;
 
 const doc = (id, customer_status, sol_status, kind='Standing Instruction') => ({id, customer_status, sol_status, kind});
 const rows = [
@@ -106,4 +109,20 @@ test('Row navigation ignores interactive controls and selected text', () => {
   clickHandler({target: {closest: () => null}});
   assert.equal(navigated, 'doc/SI-TEST');
   assert.equal(closed, true); // A row opened from the KPI dialog closes that dialog.
+});
+
+test('Rejected reviews use a cross and never a completed approval check', () => {
+  context.icon = symbol => `<svg data-icon="${symbol}"></svg>`;
+  const customer = context.renderDocumentProgress(doc('rejected', 'rejected', 'pending'));
+  const customerStep = customer.match(/<li class="status-step rejected"[\s\S]*?<\/li>/)[0];
+  assert.ok(customerStep.includes('data-icon="close"'));
+  assert.ok(!customerStep.includes('data-icon="check"'));
+  assert.ok(customer.includes('Tidak dilanjutkan'));
+  const sol = context.renderDocumentProgress(doc('rejected-sol', 'confirmed', 'rejected'));
+  const solStep = sol.match(/<li class="status-step rejected"[\s\S]*?<\/li>/)[0];
+  assert.ok(solStep.includes('data-icon="close"'));
+  assert.ok(solStep.includes('Review SOL'));
+  const approved = context.renderDocumentProgress(doc('done', 'confirmed', 'approved'));
+  assert.equal((approved.match(/data-icon="check"/g) || []).length, 3);
+  assert.ok(!approved.includes('status-step rejected'));
 });
