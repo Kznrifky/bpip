@@ -24,9 +24,9 @@ def confirmation_body(doc, link, expires, ttl_hours=24):
 {INTRO}
 
 Nasabah: {values['customer_name']}
+Nominal transaksi: {amount}
 Nomor pengajuan: {values['id']}
 Jenis dokumen: {values['kind']}
-Nominal transaksi: {amount}
 Rekening tujuan: {values['destination_account']}
 Nama Rekening Tujuan: {values['destination_name']}
 
@@ -61,7 +61,6 @@ def render_confirmation_html(body, base_url, logo_cid=None):
         if paragraph.startswith('Nasabah: ') and all(': ' in line for line in paragraph.splitlines()):
             fields = [line.split(': ', 1) for line in paragraph.splitlines()]
             break
-    amount = next((value for label, value in fields if label.lower() == 'nominal transaksi'), '')
     greeting = paragraphs[0] if paragraphs and paragraphs[0].startswith('Yth.') else 'Yth. Bapak/Ibu,'
     security_points = next(([line.removeprefix('- ') for line in paragraph.splitlines()[1:] if line.startswith('- ')] for paragraph in paragraphs if paragraph.startswith('Informasi keamanan:')), [])
     if not security_points:
@@ -70,15 +69,13 @@ def render_confirmation_html(body, base_url, logo_cid=None):
     branding = (f'<img src="cid:{escape(logo_cid)}" width="252" height="88" alt="BRI VISTA — Verification, Integration &amp; Secure Tracking Application" style="display:block;width:252px;max-width:100%;height:auto;border:0">'
                 if logo_cid else '<strong style="display:block;font-size:26px;line-height:32px;color:#0756bd">BRI VISTA</strong><span style="display:block;font-size:11px;line-height:17px;color:#657895">Verification, Integration &amp; Secure Tracking Application</span>')
     rows = []
-    for label, value in fields:
-        if label.lower() in ('nominal transaksi', 'status'):
+    for label, value in sorted(fields, key=lambda field: {'nasabah': 0, 'nominal transaksi': 1}.get(field[0].lower(), 2)):
+        if label.lower() == 'status':
             continue
         label = 'Nama Rekening Tujuan' if label.lower() == 'atas nama rekening tujuan' else label
         rows.append(f'<tr><td class="summary-label" valign="top" width="38%" style="padding:11px 14px;border-top:1px solid #e3edf9;font-size:13px;line-height:20px;color:#657895">{escape(label)}</td><td class="summary-value" valign="top" style="padding:11px 14px;border-top:1px solid #e3edf9;font-size:14px;line-height:20px;font-weight:600;color:#142c52;word-break:break-word">{escape(value)}</td></tr>')
     if fields:
         summary = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #dce7f5;border-radius:10px;border-spacing:0;background:#f8fbff;margin:20px 0 24px"><tr><td colspan="2" bgcolor="#0756bd" style="padding:13px 14px;background:#0756bd;border-radius:9px 9px 0 0;color:#fff;font-size:15px;font-weight:700;line-height:22px">Rincian Transaksi</td></tr>'
-        if amount:
-            summary += f'<tr><td colspan="2" bgcolor="#edf5ff" style="padding:16px 14px;background:#edf5ff"><span style="display:block;font-size:12px;line-height:18px;color:#657895">Nominal transaksi</span><strong style="display:block;margin-top:3px;font-size:22px;line-height:30px;color:#0756bd">{escape(amount)}</strong></td></tr>'
         summary += ''.join(rows) + '</table>'
         intro = INTRO
     else:
