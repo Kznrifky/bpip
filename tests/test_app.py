@@ -18,6 +18,7 @@ from unittest.mock import patch
 from pypdf import PdfReader
 from reportlab.pdfgen import canvas
 from PIL import Image
+from confirmation_email import expiry_label
 
 spec = importlib.util.spec_from_file_location('bpip', Path(__file__).resolve().parents[1] / 'server.py')
 app = importlib.util.module_from_spec(spec)
@@ -888,6 +889,9 @@ class WorkflowTests(unittest.TestCase):
         doc_id=self.create()
         with app.database() as db:
             row=dict(db.execute('SELECT * FROM outbox WHERE doc_id=?',(doc_id,)).fetchone())
+            expires=db.execute('SELECT expires FROM versions WHERE doc_id=? AND version=1',(doc_id,)).fetchone()['expires']
+        self.assertIn(expiry_label(expires),row['body'])
+        self.assertIn('Verifikasi Transaksi',row['subject'])
         row['body']='Yth. <script>alert(1)</script>,\n\n'+app.BASE_URL+'/#confirm/test_token\n\nJangan bagikan tautan ini.'
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':'sender@gmail.com','SMTP_FROM':'BPIP <other@example.com>'}):
             message,sender=app.build_confirmation_email(row)
@@ -905,6 +909,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('DKIM-Signature',message)
         self.assertIn('BRI VISTA',html_body)
         self.assertIn('Verification, Integration &amp; Secure Tracking Application',html_body)
+        self.assertIn('src="cid:bri-vista-logo"',html_body)
+        inline_logo=next(part for part in message.walk() if part.get('Content-ID')=='<bri-vista-logo>')
+        self.assertEqual(inline_logo.get_content_type(),'image/png')
+        self.assertEqual(inline_logo.get_content_disposition(),'inline')
+        self.assertTrue(inline_logo.get_payload(decode=True).startswith(b'\x89PNG\r\n\x1a\n'))
         self.assertNotIn('(v1)',row['subject'])
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':''}):
             with self.assertRaises(app.AppError):app.build_confirmation_email(row)

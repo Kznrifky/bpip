@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, quote
 from execution_report import build_execution_report, ReportError
+from confirmation_email import confirmation_body, render_confirmation_html
 
 ROOT = Path(__file__).resolve().parent
 for line in (ROOT / '.env').read_text().splitlines() if (ROOT / '.env').exists() else []:
@@ -263,36 +264,8 @@ def enqueue(db, doc, upload, actor, ip, agent, channel='email'):
     expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
     db.execute('INSERT INTO versions(doc_id,version,filename,mime,content,sha256,nominal,token_hash,expires,used_at,created,destination_account,destination_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp, doc['destination_account'], doc['destination_name']))
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
-    subject = f"BRI VISTA: Konfirmasi {doc['kind']} - {doc['id']}"
-    body = f"""Yth. {doc['person']},
-
-Mohon konfirmasi Anda atas surat transaksi berikut. Silakan tinjau surat dan pastikan data pengajuan sudah sesuai sebelum memberikan keputusan.
-
-Nasabah: {doc['customer_name']}
-Nomor pengajuan: {doc['id']}
-Jenis dokumen: {doc['kind']}
-Nominal transaksi: {amount}
-Rekening tujuan: {doc['destination_account'] or 'Belum tercatat'}
-Atas nama rekening tujuan: {doc['destination_name'] or 'Belum tercatat'}
-
-Untuk meninjau surat dan memberikan konfirmasi, buka tautan berikut:
-{BASE_URL}/#confirm/{token}
-
-Pilih Setujui jika surat dan data pengajuan sudah sesuai. Jika terdapat ketidaksesuaian, pilih Tolak dan sertakan alasannya. Keputusan Anda akan tercatat dan diteruskan kepada SOL untuk pemeriksaan akhir.
-
-Informasi keamanan:
-- Tautan berlaku {os.getenv('TOKEN_TTL_HOURS', '24')} jam sejak pengajuan dikirim.
-- Tautan hanya dapat digunakan untuk satu keputusan.
-- Membuka tautan tidak berarti Anda memberikan persetujuan.
-- Jangan membagikan tautan ini kepada pihak lain.
-
-Jika Anda tidak mengenali pengajuan ini atau memerlukan bantuan, hubungi petugas melalui kontak yang biasa Anda gunakan. BRI VISTA tidak meminta kata sandi, PIN, atau OTP melalui email.
-
-Terima kasih atas perhatian dan konfirmasi Anda.
-
-Hormat kami,
-BRI Jakarta Sudirman 1
-"""
+    subject = f"BRI VISTA - Verifikasi Transaksi | {doc['id']}"
+    body = confirmation_body(doc, f'{BASE_URL}/#confirm/{token}', expiry, ttl_hours=int(os.getenv('TOKEN_TTL_HOURS', '24')))
     # A manual-only row preserves the private link but is never processed by the email worker.
     db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'whatsapp_manual' if channel == 'whatsapp' else 'queued', stamp))
     delivery = {'email': 'Email', 'whatsapp': 'WhatsApp manual', 'both': 'Email dan WhatsApp manual'}[channel]
@@ -400,7 +373,7 @@ def build_confirmation_email(row):
     # Gmail SMTP must use the authenticated mailbox, rather than impersonate an alias.
     if os.getenv('SMTP_HOST', '').strip().lower() == 'smtp.gmail.com':
         sender = valid_email(os.getenv('SMTP_USER', ''))
-    name = 'BRI VISTA - Konfirmasi Dokumen' if not name or name.startswith('BPIP') else name
+    name = 'BRI VISTA' if not name or name.startswith('BPIP') else name
     message = EmailMessage(policy=SMTP)
     message['Subject'] = row['subject']
     message['From'] = formataddr((name, sender))
@@ -410,36 +383,12 @@ def build_confirmation_email(row):
     message['Message-ID'] = f"<{row['id']}@{sender.rsplit('@',1)[-1]}>"
     message['Auto-Submitted'] = 'auto-generated'
     message.set_content(row['body'])
-    # HTML mirrors the plain text; only the actual BPIP confirmation link is clickable.
-    paragraphs=[]
-    security_open = False
-    for paragraph in row['body'].strip().split('\n\n'):
-        lines=[]
-        for line in paragraph.splitlines():
-            if line.startswith(BASE_URL+'/#confirm/') and re.fullmatch(r'[A-Za-z0-9_-]+',line[len(BASE_URL+'/#confirm/'):]):
-                url=html.escape(line,quote=True)
-                lines.append(f'<a href="{url}" style="display:block;margin-top:12px;background:#0857c3;color:#fff;padding:16px 20px;border-radius:8px;text-decoration:none;text-align:center;font-weight:700">Tinjau surat dan konfirmasi</a>')
-            else:
-                lines.append(html.escape(line))
-        if paragraph.startswith('Nasabah: ') and all(': ' in line for line in paragraph.splitlines()):
-            rows=[]
-            fields = [line.split(': ', 1) for line in paragraph.splitlines()]
-            fields.append(('Status', 'Menunggu Konfirmasi'))
-            for label, value in fields:
-                rows.append('<tr><td valign="middle" style="padding:12px 16px;vertical-align:middle;color:#5b7188;width:36%;line-height:22px;border-top:1px solid #dce6f3">'+html.escape(label)+'</td><td valign="middle" style="padding:12px 16px;vertical-align:middle;color:#3c3c3c;font-weight:600;line-height:22px;border-top:1px solid #dce6f3;overflow-wrap:anywhere">'+html.escape(value)+'</td></tr>')
-            paragraphs.append('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#edf6fd" style="border-collapse:collapse;width:100%;margin:0 0 20px;border:1px solid #dce6f3;background:#edf6fd;font-size:14px"><tr><td colspan="2" align="center" bgcolor="#0857c3" style="background:#0857c3;color:#ffffff;text-align:center;padding:16px;font-weight:700;font-size:17px;line-height:24px">Ringkasan Transaksi</td></tr>'+''.join(rows)+'</table>')
-        elif paragraph.startswith('Informasi keamanan:') or paragraph.startswith('Tautan berlaku '):
-            points = paragraph.splitlines()[1:] if paragraph.startswith('Informasi keamanan:') else re.split(r'(?<=\.)\s+', paragraph)
-            items = ''.join('<li style="margin:0 0 6px;padding-left:2px">'+html.escape(point.removeprefix('- '))+'</li>' for point in points if point)
-            security_open = True
-            paragraphs.append('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#edf6fd" style="margin:0 0 20px;background:#edf6fd;border:1px solid #dce6f3;border-radius:8px"><tr><td style="padding:18px;color:#3c3c3c;line-height:1.7"><strong style="display:block;color:#0857c3;font-size:16px;margin-bottom:8px">Informasi keamanan</strong><ul style="margin:0 0 20px;padding-left:20px">'+items+'</ul>')
-        else:
-            margin = '0' if security_open and paragraph.startswith('Hormat kami,') else '0 0 20px'
-            paragraphs.append('<p style="margin:'+margin+';line-height:1.7">'+'<br>'.join(lines)+'</p>')
-    if security_open:
-        paragraphs.append('</td></tr></table>')
-    email_html = '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Konfirmasi dokumen BRI VISTA</title></head><body style="margin:0;padding:0;background:#f3f7fd;font-family:Arial,sans-serif;font-size:14px;color:#3c3c3c"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px"><tr><td style="background:#fff;border-bottom:5px solid #0857c3;border-radius:10px;padding:22px 26px;color:#0857c3"><strong style="font-size:26px">BRI VISTA</strong><span style="display:block;font-size:12px;margin-top:4px;color:#5b7188">Verification, Integration &amp; Secure Tracking Application</span></td></tr><tr><td style="height:16px"></td></tr><tr><td style="background:#fff;border:1px solid #dce6f3;border-radius:10px;padding:26px"><h1 style="margin:0 0 26px;color:#0857c3;font-size:25px;line-height:1.35">Konfirmasi surat transaksi</h1>'+''.join(paragraphs)+'<p style="padding-top:20px;border-top:1px solid #dce6f3;text-align:center;font-size:12px;color:#5b7188;margin:0">BRI VISTA<br>Verification, Integration &amp; Secure Tracking Application</p></td></tr></table></td></tr></table></body></html>'
+    logo = ROOT / 'web/assets/bri-vista-login-logo.png'
+    logo_cid = 'bri-vista-logo' if logo.is_file() else None
+    email_html = render_confirmation_html(row['body'], BASE_URL, logo_cid)
     message.add_alternative(email_html, subtype='html')
+    if logo_cid:
+        message.get_payload()[-1].add_related(logo.read_bytes(), maintype='image', subtype='png', cid=f'<{logo_cid}>', filename='bri-vista.png', disposition='inline')
     return message, sender
 
 def deliver_one():
