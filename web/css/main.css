@@ -912,3 +912,6 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 /* Only the SOL approval button uses the requested green action color. */
 .detail-decision-card .btn[data-decision="approved"] { color: #fff; background: #166534; border-color: #166534; }
 .detail-decision-card .btn[data-decision="approved"]:hover { background: #14532d; border-color: #14532d; }
+
+/* Return from document detail to the originating list. */
+.detail-title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }

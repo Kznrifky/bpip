@@ -154,6 +154,7 @@ async function renderRoute() {
  if(!state.user)return boot();
  if(!$('#main'))renderShell();
  if(state.route!==route){state.documentDeleteMode=false;state.documentSelected=[];state.customerDeleteMode=false;state.customerEditMode=false;state.customerSelected=[];}
+ if(route.startsWith('doc/')&&state.route!==route&&!state.route.startsWith('doc/'))state.detailBackRoute=['dashboard','history','documents'].includes(state.route)&&$('#doc-table')?state.route:null;
  state.route=route;
  if(state.user.role==='it'&&!['accounts','settings'].includes(route)){go('accounts');return;}
  if(state.user.role==='boh'&&!route.startsWith('doc/')&&!['dashboard','history','settings','customer-updates','accounts'].includes(route)){go('dashboard');return;}
@@ -368,10 +369,11 @@ function renderDetail() {
  const detailNav=historyOutcome(d)?'history':state.user.role==='boh'?'dashboard':'documents';
  document.querySelectorAll('.nav [data-route]').forEach(button=>{const active=button.dataset.route===detailNav;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
  const customer=state.customers.find(c=>c.cif===d.cif);
+ const backRoute=state.detailBackRoute||(historyOutcome(d)?'history':'dashboard');
  const activities=d.audit.filter(a=>a.action!=='Email diterima server SMTP');
  const field=(label,value,symbol)=>`<div class="detail-data-row"><dt><span class="detail-field-icon">${icon(symbol)}</span><span>${label}</span></dt><dd>${esc(value||'Belum tercatat')}</dd></div>`;
  const cardHead=(title,symbol,tone='blue',extra='')=>`<div class="card-head detail-card-head"><div class="detail-card-title"><span class="detail-card-icon ${tone}">${icon(symbol)}</span><h2>${title}</h2></div>${extra}</div>`;
- $('#main').innerHTML=`<div class="detail-page-heading"><div><h1>${esc(d.customer_name)}</h1></div>${canDownload?`<div class="detail-heading-actions"><button class="btn primary small" data-action="download-execution-pdf" aria-label="Unduh Dokumen Pelaksanaan">${icon('download')} Dokumen Pelaksanaan</button></div>`:''}</div>
+ $('#main').innerHTML=`<div class="detail-page-heading"><div class="detail-title-row"><button type="button" class="btn icon small" data-route="${backRoute}" aria-label="Kembali" title="Kembali">${icon('left')}</button><h1>${esc(d.customer_name)}</h1></div>${canDownload?`<div class="detail-heading-actions"><button class="btn primary small" data-action="download-execution-pdf" aria-label="Unduh Dokumen Pelaksanaan">${icon('download')} Dokumen Pelaksanaan</button></div>`:''}</div>
  ${renderDocumentProgress(d)}
  <div class="detail-card-stack">
  <section class="card detail-section-card">${cardHead('Informasi Pengajuan','file')}<div class="detail-summary-grid"><div class="detail-summary-cell"><span class="detail-summary-symbol">${icon('file')}</span><dl><dt>Nomor SI</dt><dd class="detail-id-value"><span id="detail-document-id">${esc(d.id)}</span><button class="btn icon small" data-action="copy-document-id" aria-label="Salin nomor SI" title="Salin nomor SI">${icon('copy')}</button></dd></dl></div><div class="detail-summary-cell"><span class="detail-summary-symbol">${icon('calendar')}</span><dl><dt>Dibuat pada</dt><dd>${date(d.created)}</dd></dl></div><div class="detail-summary-cell"><span class="detail-summary-symbol purple">${icon('file')}</span><dl><dt>Jenis dokumen</dt><dd>${esc(d.kind)}</dd></dl></div></div></section>
