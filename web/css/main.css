@@ -555,7 +555,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .status-step:not(:last-child)::after { content: ""; position: absolute; left: auto; right: 0; top: 50%; transform: translateY(-50%); height: 32px; width: 0; background: transparent; border-right: 1px solid var(--line); }
 .status-step-marker { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: #f8fafc; font-size: 14px; font-weight: 700; }
 .status-step-marker svg { width: 17px; height: 17px; }
-.status-step.complete .status-step-marker { color: #198366; background: #ebf7f1; border-color: #d4ede2; }
+.status-step.complete .status-step-marker { color: #fff; background: #166534; border-color: #166534; }
 .status-step.current .status-step-marker { color: white; background: var(--green); border-color: var(--green); }
 .status-step.current .status-step-copy strong { color: var(--green); }
 .status-step-copy { display: grid; min-width: 0; padding-right: 12px; background: transparent; gap: 4px; overflow-wrap: anywhere; }
@@ -815,7 +815,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .portal-result-symbol { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; margin: auto; color: #0756bd; background: #e5f0ff; }
 .portal-result-symbol svg { width: 30px; height: 30px; }
 .portal-result-symbol.confirmed { background: #eaf7f1; color: #168162; }
-.portal-result-symbol.rejected { background: #fff0f0; color: #cf2626; }
+.portal-result-symbol.rejected { background: #ef4444; color: #fff; }
 .portal-result-summary { margin: 24px 0; text-align: left; border: 1px solid #e3edf9; border-radius: 9px; background: #f8fbff; padding: 6px 18px; }
 .portal-result-summary > div { display: grid; grid-template-columns: 1fr 1.3fr; gap: 12px; padding: 12px 0; }
 .portal-result-summary > div + div { border-top: 1px solid #e3edf9; }
@@ -906,5 +906,9 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .document-row-link:hover { text-decoration: underline; }
 
 /* A rejection is a failed review, distinct from a completed approval. */
-.status-step.rejected .status-step-marker { color: #cf2626; background: #fff0f0; border-color: #f3cccc; }
-.status-step.rejected .status-step-copy > span { color: #b91c1c; }
+.status-step.rejected .status-step-marker { color: #fff; background: #ef4444; border-color: #ef4444; }
+.status-step.rejected .status-step-copy > span { color: #dc2626; }
+
+/* Only the SOL approval button uses the requested green action color. */
+.detail-decision-card .btn[data-decision="approved"] { color: #fff; background: #166534; border-color: #166534; }
+.detail-decision-card .btn[data-decision="approved"]:hover { background: #14532d; border-color: #14532d; }

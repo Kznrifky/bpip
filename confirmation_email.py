@@ -86,7 +86,7 @@ def render_confirmation_html(body, base_url, logo_cid=None):
     action = ''
     if link:
         safe_link = escape(link)
-        action = f'''<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="#0756bd" style="border-radius:8px;background:#0756bd"><a href="{safe_link}" style="display:block;border:1px solid #0756bd;border-radius:8px;padding:14px 18px;color:#fff;background:#0756bd;font-size:16px;line-height:22px;font-weight:700;text-decoration:none;text-align:center;mso-padding-alt:0">Verifikasi Transaksi</a></td></tr></table>'''
+        action = f'''<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="#166534" style="border-radius:8px;background:#166534"><a href="{safe_link}" style="display:block;border:1px solid #166534;border-radius:8px;padding:14px 18px;color:#fff;background:#166534;font-size:16px;line-height:22px;font-weight:700;text-decoration:none;text-align:center;mso-padding-alt:0">Verifikasi Transaksi</a></td></tr></table>'''
     legacy_points = {
         'Tautan hanya dapat digunakan untuk satu keputusan.': 'Link verifikasi hanya dapat digunakan satu kali untuk memberikan keputusan.',
         'Membuka tautan tidak berarti Anda memberikan persetujuan.': 'Membuka link verifikasi tidak secara otomatis memberikan persetujuan.',
