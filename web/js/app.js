@@ -488,7 +488,7 @@ async function viewFile(download=false,portalToken=null) {
  else{const mime=portalToken?state.portal.file.mime:state.detail.file.mime;$('#preview-container').innerHTML=mime==='application/pdf'?`<iframe class="file-preview" title="Pratinjau surat PDF" src="${previewUrl}"></iframe>`:`<img class="image-preview" alt="Pratinjau surat" src="${previewUrl}">`;}
 }
 function portalHeader() {
- return `<header class="portal-header"><div class="portal-logo"><img src="/assets/bri-vista-login-logo.png" width="2120" height="742" alt="BRI VISTA — Verification, Integration &amp; Secure Tracking Application" fetchpriority="high"></div><span class="portal-private">${icon('lock')} Tautan pribadi</span></header>`;
+ return `<header class="portal-header"><div class="portal-logo"><img src="/assets/bri-vista-login-logo.png" width="2120" height="742" alt="BRI VISTA — Verification, Integration &amp; Secure Tracking Application" fetchpriority="high"></div><span class="portal-private">${icon('lock')} Link Pribadi</span></header>`;
 }
 function portalFooter() {
  return `<footer class="portal-footer"><p>${icon('lock')} Selalu jaga kerahasiaan tautan dan informasi transaksi Anda.</p><p>BRI VISTA</p></footer>`;
