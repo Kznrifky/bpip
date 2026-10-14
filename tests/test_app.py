@@ -186,24 +186,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(DESTINATION['destination_account'], body)
         self.assertIn(DESTINATION['destination_name'], body)
 
-    def test_destination_revision_preserves_old_snapshot(self):
+    def test_disabled_revision_preserves_destination_snapshot(self):
         doc = self.create()
-        old_token = self.token(doc)
-        self.respond(old_token)
-        self.sol.call('/documents/' + doc + '/review', {'version': 1, 'decision': 'revision_requested', 'notes': 'Perbaiki rekening tujuan'})
-        payload = {'version': 1, 'kind': 'Standing Instruction', 'nominal': 250000000, 'notes': 'Rekening tujuan diperbaiki', 'file': FILE, **DESTINATION}
-        self.assertEqual(self.maker.call('/documents/' + doc + '/revise', {**payload, 'destination_name': ''})[0], 400)
-        self.assertEqual(self.maker.call('/documents/' + doc)[1]['document']['version'], 1)
-        changed = {'destination_account': '009876543210000', 'destination_name': 'PT Penerima Baru'}
-        self.assertEqual(self.maker.call('/documents/' + doc + '/revise', {**payload, **changed})[0], 200)
-        self.assertEqual(self.customer.call('/portal', {'token': old_token})[0], 410)
+        self.respond(self.token(doc))
+        before = self.maker.call('/documents/' + doc)[1]['document']
+        self.assertEqual(self.sol.call('/documents/' + doc + '/review', {'version': 1, 'decision': 'revision_requested', 'notes': 'Perbaiki rekening tujuan'})[0], 400)
+        payload = {'version': 1, 'kind': 'Standing Instruction', 'nominal': 250000000, 'notes': 'Ubah rekening', 'file': FILE, 'destination_account': '009876543210000', 'destination_name': 'PT Baru'}
+        self.assertEqual(self.maker.call('/documents/' + doc + '/revise', payload)[0], 410)
         detail = self.maker.call('/documents/' + doc)[1]['document']
-        portal = self.customer.call('/portal', {'token': self.token(doc)})[1]['document']
+        self.assertEqual(detail['version'], 1)
+        self.assertEqual(detail['updated'], before['updated'])
+        self.assertEqual(detail['audit'], before['audit'])
         for field in DESTINATION:
-            self.assertEqual(detail[field], changed[field])
-            self.assertEqual(portal[field], changed[field])
-            self.assertEqual(detail['versions'][0][field], changed[field])
-            self.assertEqual(detail['versions'][1][field], DESTINATION[field])
+            self.assertEqual(detail[field], DESTINATION[field])
+            self.assertEqual(detail['versions'][0][field], DESTINATION[field])
 
     def test_destination_migration_preserves_legacy_records(self):
         doc = self.create()
@@ -334,7 +330,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0)
         self.assertEqual(self.maker.call('/documents',{**payload,'channel':'email'})[0],201)
 
-    def test_delivery_channel_resend_and_revision(self):
+    def test_delivery_channel_resend_with_revision_disabled(self):
         doc=self.create()
         with app.database(True) as db:
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
@@ -347,11 +343,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.respond(old_token)[0],410)
         self.assertFalse(app.deliver_one())
         self.respond(self.token(doc))
-        self.sol.call('/documents/'+doc+'/review',{'version':2,'decision':'revision_requested','notes':'Perbaiki surat'})
+        self.assertEqual(self.sol.call('/documents/'+doc+'/review',{'version':2,'decision':'revision_requested','notes':'Perbaiki surat'})[0],400)
         result=self.maker.call('/documents/'+doc+'/revise',{**DESTINATION,'version':2,'kind':'Standing Instruction','nominal':2,'notes':'Diperbaiki','file':FILE,'channel':'both'})
-        self.assertEqual(result[0],200,result[1])
-        self.assertIn(self.token(doc),result[1]['whatsapp']['message'])
-        self.assertTrue(app.deliver_one())
+        self.assertEqual(result[0],410,result[1])
+        self.assertFalse(app.deliver_one())
 
     def test_both_channels_lock_current_link_and_resend_resets_selection(self):
         with app.database(True) as db:
@@ -498,40 +493,39 @@ class WorkflowTests(unittest.TestCase):
             version=db.execute('SELECT expires FROM versions WHERE doc_id=? AND version=2',(doc,)).fetchone()
         self.assertEqual(preview['expires'],version['expires'])
 
-    def test_full_revision_and_approval_flow(self):
+    def test_simple_resend_and_approval_flow(self):
         doc_id=self.create();token1=self.token(doc_id)
-        # Opening portal has no consent side effects.
         for _ in range(2):
             status,result,_=self.customer.call('/portal',{'token':token1})
             self.assertEqual(status,200)
             self.assertEqual(result['document']['nominal'],250000000)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
-        self.assertEqual(self.respond(token1)[0],200)
-        self.assertEqual(self.respond(token1)[0],410)
-        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki tanggal surat'})[0],200)
-        revision={**DESTINATION,'version':1,'kind':'Standing Instruction','nominal':260000000,'description':'Nominal diperbaiki','notes':'Tanggal diperbaiki','file':FILE}
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',revision)[0],200)
+        with app.database(True) as db:
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc_id))
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/resend',{'version':1})[0],200)
         token2=self.token(doc_id)
         self.assertNotEqual(token1,token2)
         self.assertEqual(self.customer.call('/portal',{'token':token1})[0],410)
-        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
         self.assertEqual(self.respond(token2)[0],200)
+        self.assertEqual(self.respond(token2)[0],410)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':2,'decision':'revision_requested','notes':'Perbaiki surat'})[0],400)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':2,'decision':'approved','notes':'Surat sesuai'})[0],200)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':2,'decision':'rejected','notes':'Ubah keputusan'})[0],409)
-        status,result,_=self.maker.call('/documents/'+doc_id)
-        d=result['document']
+        d=self.maker.call('/documents/'+doc_id)[1]['document']
         self.assertEqual(d['sol_status'],'approved')
         self.assertEqual(len(d['versions']),2)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/versions/1/file')[0],200)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/versions/3/file')[0],404)
-        self.assertTrue(any(a['action']=='SOL meminta revisi surat' for a in d['audit']))
+        self.assertTrue(any(a['action']=='SOL menyetujui pengajuan' for a in d['audit']))
         self.assertTrue(any(a['ip'] for a in d['audit']))
         self.assertEqual(self.customer.call('/documents')[0],401)
+
     def test_rejected_customer_cannot_continue_to_approval_or_revision(self):
         doc_id=self.create()
         self.assertEqual(self.respond(self.token(doc_id),'rejected')[0],200)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],409)
-        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki surat'})[0],409)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki surat'})[0],400)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':''})[0],400)
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'rejected','notes':'Nasabah menolak surat'})[0],200)
     def test_legacy_revision_request_cannot_reopen_customer_rejection(self):
@@ -540,7 +534,7 @@ class WorkflowTests(unittest.TestCase):
         with app.database(write=True) as db:
             db.execute("UPDATE documents SET sol_status='revision_requested' WHERE id=?",(doc_id,))
         revision={**DESTINATION,'version':1,'kind':'Standing Instruction','nominal':260000000,'description':'Perbaikan surat','notes':'Surat diperbaiki','file':FILE}
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',revision)[0],409)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',revision)[0],410)
         detail=self.maker.call('/documents/'+doc_id)[1]['document']
         self.assertEqual(detail['version'],1)
         self.assertEqual(detail['customer_status'],'rejected')
@@ -602,41 +596,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.sol.call('/customers/887/phone',{'phone':''})[0],400)
         self.assertEqual(stored_phone(), '+6281234567890')
         self.assertEqual(self.sol.call('/customers/999999/phone',{'phone':'081234567890'})[0],404)
-    def test_cancel_preserves_history_and_invalidates_customer_link(self):
+    def test_cancel_is_disabled_without_changing_document_or_token(self):
         doc_id=self.create();token=self.token(doc_id)
+        before=self.maker.call('/documents/'+doc_id)[1]['document']
         payload={'version':1,'notes':'Transaksi tidak dilanjutkan'}
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/cancel',payload)[0],403)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':''})[0],400)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':2,'notes':'Uji'})[0],409)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',payload)[0],200)
-        self.assertEqual(self.customer.call('/portal',{'token':token})[0],410)
-        self.assertEqual(self.respond(token)[0],410)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/resend',{'version':1})[0],409)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',{'version':1})[0],409)
+        for data in (payload, {'version':1,'notes':''}, {'version':2,'notes':'Uji'}):
+            self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',data)[0],410)
         d=self.maker.call('/documents/'+doc_id)[1]['document']
-        self.assertEqual(d['sol_status'],'cancelled')
+        self.assertEqual(d['sol_status'],'pending')
+        self.assertEqual(d['updated'],before['updated'])
+        self.assertEqual(d['audit'],before['audit'])
         self.assertEqual(len(d['versions']),1)
-        self.assertTrue(any(a['notes']==payload['notes'] for a in d['audit']))
-        self.assertFalse(app.deliver_one())
+        self.assertEqual(self.customer.call('/portal',{'token':token})[0],200)
+        self.assertEqual(self.respond(token)[0],200)
+
     def test_final_sol_decision_cannot_be_cancelled(self):
         doc_id=self.create();self.respond(self.token(doc_id))
         self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],200)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':'Uji'})[0],409)
-    def test_customer_approval_blocks_cancel_before_sol_and_after_revision_request(self):
-        doc_id = self.create()
-        self.assertEqual(self.respond(self.token(doc_id))[0], 200)
-        path = '/documents/' + doc_id
-        before = self.maker.call(path)[1]['document']
-        self.assertEqual(self.maker.call(path + '/cancel', {'version': 1, 'notes': 'Uji'})[0], 409)
-        after = self.maker.call(path)[1]['document']
-        self.assertEqual(after['customer_status'], 'confirmed')
-        self.assertEqual(after['sol_status'], 'pending')
-        self.assertEqual(after['updated'], before['updated'])
-        self.assertEqual(after['audit'], before['audit'])
-        self.assertEqual(self.sol.call(path + '/review', {'version': 1, 'decision': 'revision_requested', 'notes': 'Perbaiki surat'})[0], 200)
-        self.assertEqual(self.maker.call(path + '/cancel', {'version': 1, 'notes': 'Uji'})[0], 409)
-        self.assertEqual(self.maker.call(path + '/revise', {**DESTINATION, 'version': 1, 'kind': 'Warkat', 'nominal': 100, 'file': FILE, 'notes': 'Revisi'})[0], 200)
-        self.assertEqual(self.maker.call(path + '/cancel', {'version': 2, 'notes': 'Batalkan surat baru yang belum disetujui'})[0], 200)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':'Uji'})[0],410)
+    def test_legacy_revision_request_can_only_receive_final_sol_decision(self):
+        for decision in ('approved','rejected'):
+            with self.subTest(decision=decision):
+                doc_id=self.create()
+                self.assertEqual(self.respond(self.token(doc_id))[0],200)
+                path='/documents/'+doc_id
+                with app.database(True) as db:
+                    db.execute("UPDATE documents SET sol_status='revision_requested' WHERE id=?",(doc_id,))
+                self.assertEqual(self.maker.call(path+'/cancel',{'version':1,'notes':'Uji'})[0],410)
+                self.assertEqual(self.maker.call(path+'/revise',{**DESTINATION,'version':1,'kind':'Warkat','nominal':100,'file':FILE,'notes':'Revisi'})[0],410)
+                self.assertEqual(self.sol.call(path+'/review',{'version':1,'decision':decision,'notes':'Keputusan akhir'})[0],200)
+                self.assertEqual(self.maker.call(path)[1]['document']['sol_status'],decision)
 
     def test_customer_approval_blocks_single_and_bulk_document_deletion(self):
         pending = self.create()
@@ -709,8 +699,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.maker.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Warkat','nominal':10,'file':FILE})[0],409)
         self.assertEqual(self.maker.call('/documents/'+doc_id)[1]['document']['customer_name'],'PT Maju Bersama')
         self.assertEqual(self.respond(self.token(doc_id))[0],200)
-        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'revision_requested','notes':'Perbaiki surat'})[0],200)
-        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',{**DESTINATION,'version':1,'kind':'Warkat','nominal':10,'file':FILE,'notes':'Diperbaiki'})[0],200)
+        self.assertEqual(self.sol.call('/documents/'+doc_id+'/review',{'version':1,'decision':'approved','notes':''})[0],200)
+        self.assertEqual(self.maker.call('/documents/'+doc_id+'/revise',{**DESTINATION,'version':1,'kind':'Warkat','nominal':10,'file':FILE,'notes':'Diperbaiki'})[0],410)
         self.assertEqual(self.maker.call('/customers/restore-all',{})[0],403)
         self.assertEqual(self.sol.call('/customers/restore-all',{})[0],200)
         self.assertTrue(any(c['cif']=='1234567' for c in self.maker.call('/customers')[1]['customers']))
@@ -760,7 +750,7 @@ class WorkflowTests(unittest.TestCase):
             for table,col in [('documents','id'),('versions','doc_id'),('outbox','doc_id')]:
                 self.assertEqual(db.execute(f'SELECT COUNT(*) FROM {table} WHERE {col}=?',(doc,)).fetchone()[0],0)
             self.assertGreater(db.execute('SELECT COUNT(*) FROM audit WHERE doc_id=?',(doc,)).fetchone()[0],0)
-    def test_boh_dashboard_only_and_password_lockout(self):
+    def test_boh_document_read_only_and_password_lockout(self):
         doc=self.create()
         account={'name':'BOH Uji','email':'boh@example.test','new_password':'ObserverTest!2026','password':'SolDemo!2026'}
         self.assertEqual(self.maker.call('/users/boh',account)[0],404)
@@ -772,9 +762,11 @@ class WorkflowTests(unittest.TestCase):
         rows=boh.call('/documents')[1]['documents']
         self.assertEqual(rows[0]['id'],doc)
         self.assertNotIn('email',rows[0]);self.assertNotIn('account',rows[0]);self.assertNotIn('file',rows[0])
-        for path in ['/customers','/outbox','/documents/'+doc,'/documents/'+doc+'/file','/customers/archived']:
+        for path in ['/customers','/outbox','/customers/archived']:
             self.assertEqual(boh.call(path)[0],403)
-        for path,payload in [('/customers',{}),('/documents',{}),('/documents/'+doc+'/review',{}),('/customers/1234567/archive',{}),('/users/boh',account)]:
+        for path in ['/documents/'+doc,'/documents/'+doc+'/file','/documents/'+doc+'/versions/1/file']:
+            self.assertEqual(boh.call(path)[0],200)
+        for path,payload in [('/customers',{}),('/documents',{}),('/customers/1234567/archive',{}),('/users/boh',account)] + [('/documents/'+doc+'/'+action,{'version':1,'decision':'approved'}) for action in ('review','resend','send-confirmation','revise','cancel','archive')]:
             self.assertEqual(boh.call(path,payload)[0],403)
         for _ in range(5):
             self.assertEqual(self.sol.call('/customers/1234567/archive',{'password':'wrong'})[0],403)
@@ -804,7 +796,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotEqual(self.token(doc_id), original_token)
         self.assertEqual(self.respond(original_token)[0], 410)
         self.assertEqual(self.maker.call(path + '/resend', {'version': 2})[0], 429)
-        self.assertEqual(self.maker.call(path + '/cancel', {'version': 2, 'notes': 'Pembatalan oleh petugas'})[0], 200)
+        self.assertEqual(self.maker.call(path + '/cancel', {'version': 2, 'notes': 'Pembatalan oleh petugas'})[0], 410)
 
     def test_resend_waits_from_actual_email_delivery(self):
         doc_id = self.create()

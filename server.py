@@ -365,7 +365,7 @@ def document_summary(db, row):
 def owned_document(db, doc_id, user, shared_read=False):
     doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
     require(doc is not None, 'Pengajuan tidak ditemukan.', 404)
-    require(user['role'] == 'sol' or doc['maker'] == user['id'] or (shared_read and user['role'] == 'petugas'), 'Anda tidak memiliki akses ke pengajuan ini.', 403)
+    require(user['role'] == 'sol' or doc['maker'] == user['id'] or (shared_read and user['role'] in ('petugas', 'boh')), 'Anda tidak memiliki akses ke pengajuan ini.', 403)
     require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc_id,)).fetchone(), 'Pengajuan telah dihapus dari daftar. SOL dapat memulihkannya.', 404)
     return doc
 
@@ -560,7 +560,7 @@ class Handler(BaseHTTPRequestHandler):
                     requests.sort(key=lambda row: row['status'] != 'pending')
                     return self.respond({'requests': requests})
                 require(user['role'] != 'it', 'IT hanya dapat mengelola akun Officer.', 403)
-                require(user['role'] != 'boh' or path in ('/api/documents', '/api/customer-edit-requests'), 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah serta akun Officer.', 403)
+                require(user['role'] != 'boh' or (path in ('/api/documents', '/api/customer-edit-requests') or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file)?', path)), 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah serta akun Officer.', 403)
                 if path == '/api/customer-edit-requests':
                     require(user['role'] in ('sol', 'boh'), 'Hanya SOL dan BOH yang dapat melihat pembaruan nasabah.', 403)
                     return self.respond({'requests': [customer_edit_payload(row) for row in db.execute("SELECT * FROM customer_edit_requests ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, created DESC")]})
@@ -617,6 +617,8 @@ class Handler(BaseHTTPRequestHandler):
                         version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
                         return self.send_file(version)
                     result = document_summary(db, doc)
+                    customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
+                    result['phone'] = customer['phone'] if customer else ''
                     result['audit'] = [dict(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id DESC', (doc['id'],))]
                     result['versions'] = [dict(r) for r in db.execute('SELECT version,filename,sha256,nominal,created,destination_account,destination_name FROM versions WHERE doc_id=? ORDER BY version DESC', (doc['id'],))]
                     return self.respond({'document': result})
@@ -955,46 +957,33 @@ class Handler(BaseHTTPRequestHandler):
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 archive_document(db, doc, user, ip, agent)
             elif operation == 'cancel':
-                require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat membatalkan pengajuan.', 403)
-                require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
-                require(doc['sol_status'] in ('pending', 'revision_requested'), 'Pengajuan dengan keputusan akhir tidak dapat dibatalkan.', 409)
-                require(doc['customer_status'] != 'confirmed', 'Pengajuan yang sudah disetujui nasabah tidak dapat dibatalkan.', 409)
-                notes = text_field(data, 'notes', 1500)
-                db.execute("UPDATE documents SET sol_status='cancelled',updated=? WHERE id=?", (now(), doc['id']))
-                db.execute('UPDATE versions SET expires=0 WHERE doc_id=?', (doc['id'],))
-                db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND status IN ('queued','retry','failed')", (doc['id'],))
-                add_audit(db, doc, 'Petugas membatalkan pengajuan', user['name'], notes, ip, agent)
+                require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat melakukan tindakan ini.', 403)
+                raise AppError(410, 'Pembatalan pengajuan sudah dinonaktifkan. Pengajuan diselesaikan melalui keputusan nasabah dan SOL.')
             elif operation == 'review':
                 require(user['role'] == 'sol', 'Hanya SOL yang dapat memutuskan pengajuan.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 require(doc['customer_status'] in ('confirmed', 'rejected'), 'Tunggu respons nasabah sebelum melakukan review.', 409)
-                require(doc['sol_status'] == 'pending', 'Pengajuan ini sudah direview.', 409)
+                require(doc['sol_status'] in ('pending', 'revision_requested'), 'Pengajuan ini sudah direview.', 409)
                 decision = data.get('decision')
-                require(decision in ('approved', 'rejected', 'revision_requested'), 'Keputusan tidak valid.')
+                require(decision in ('approved', 'rejected'), 'SOL hanya dapat menyetujui atau menolak pengajuan.')
                 require(decision == 'rejected' or doc['customer_status'] == 'confirmed', 'Pengajuan yang ditolak nasabah tidak dapat dilanjutkan.', 409)
                 notes = text_field(data, 'notes', 1500, decision != 'approved')
                 db.execute('UPDATE documents SET sol_status=?,sol_notes=?,updated=? WHERE id=?', (decision, notes, now(), doc['id']))
-                add_audit(db, doc, {'approved': 'SOL menyetujui pengajuan', 'rejected': 'SOL menolak pengajuan', 'revision_requested': 'SOL meminta revisi surat'}[decision], user['name'] + ' (SOL)', notes, ip, agent)
+                add_audit(db, doc, {'approved': 'SOL menyetujui pengajuan', 'rejected': 'SOL menolak pengajuan'}[decision], user['name'] + ' (SOL)', notes, ip, agent)
             else:
                 require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat melakukan tindakan ini.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 if operation == 'revise':
-                    require(doc['sol_status'] == 'revision_requested', 'Revisi hanya tersedia setelah diminta oleh SOL.', 409)
-                    require(doc['customer_status'] == 'confirmed', 'Pengajuan yang ditolak nasabah tidak dapat dilanjutkan.', 409)
-                    kind, nominal, description, destination_account, destination_name = transaction_fields(data)
-                    upload = read_file(data)
-                    notes = text_field(data, 'notes', 1500)
-                    db.execute("UPDATE documents SET kind=?,nominal=?,description=?,destination_account=?,destination_name=?,version=version+1,customer_status='pending',sol_status='pending',sol_notes='',updated=? WHERE id=?", (kind, nominal, description, destination_account, destination_name, now(), doc['id']))
-                else:
-                    require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Tautan baru hanya dapat dibuat saat menunggu nasabah.', 409)
-                    previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
-                    require(time.time() >= resend_available_at(db, doc) or previous['expires'] <= time.time(), 'Kirim ulang tersedia setelah 24 jam atau saat tautan sudah kedaluwarsa.', 429)
-                    upload = (previous['filename'], previous['mime'], previous['content'], previous['sha256'])
-                    notes = 'Tautan sebelumnya dibatalkan. Tautan konfirmasi baru diterbitkan.'
-                    db.execute('UPDATE documents SET version=version+1,updated=? WHERE id=?', (now(), doc['id']))
+                    raise AppError(410, 'Revisi surat sudah dinonaktifkan. SOL hanya dapat menyetujui atau menolak pengajuan.')
+                require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Tautan baru hanya dapat dibuat saat menunggu nasabah.', 409)
+                previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
+                require(time.time() >= resend_available_at(db, doc) or previous['expires'] <= time.time(), 'Kirim ulang tersedia setelah 24 jam atau saat tautan sudah kedaluwarsa.', 429)
+                upload = (previous['filename'], previous['mime'], previous['content'], previous['sha256'])
+                notes = 'Tautan sebelumnya dibatalkan. Tautan konfirmasi baru diterbitkan.'
+                db.execute('UPDATE documents SET version=version+1,updated=? WHERE id=?', (now(), doc['id']))
                 db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND status IN ('queued','retry','failed')", (doc['id'],))
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc['id'],)).fetchone()
-                add_audit(db, doc, 'Petugas mengunggah revisi surat' if operation == 'revise' else 'Petugas meminta tautan konfirmasi baru', user['name'], notes, ip, agent)
+                add_audit(db, doc, 'Petugas meminta tautan konfirmasi baru', user['name'], notes, ip, agent)
                 preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
                 db.commit()
                 return self.respond({'ok': True, 'id': doc['id'], 'whatsapp': preview})

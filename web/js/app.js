@@ -95,11 +95,12 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sidebar')?.clas
 window.matchMedia('(max-width: 760px)').addEventListener('change',e=>{if(!e.matches)setMenuOpen(false);});
 document.addEventListener('click',e=>{const picker=$('#date-picker');if(picker?.open&&!picker.contains(e.target))picker.open=false;});
 const labels = {pending:'Menunggu nasabah',confirmed:'Disetujui nasabah',rejected:'Ditolak nasabah'};
-const solLabels = {pending:'Menunggu Verifikasi',approved:'Disetujui SOL',rejected:'Ditolak SOL',revision_requested:'Perlu revisi',cancelled:'Dibatalkan',whatsapp_manual:'Tidak dipilih'};
-const colors = {review:'amber',pending:'amber',confirmed:'green',rejected:'red',approved:'green',revision_requested:'blue'};
+const solLabels = {pending:'Menunggu Verifikasi',approved:'Disetujui SOL',rejected:'Ditolak SOL',revision_requested:'Menunggu Verifikasi',cancelled:'Ditolak',whatsapp_manual:'Tidak dipilih'};
+const colors = {review:'amber',pending:'amber',confirmed:'green',rejected:'red',approved:'green',revision_requested:'amber'};
 const mailLabels = {queued:'Menunggu pengiriman',sending:'Sedang dikirim',sent:'Diserahkan ke layanan email',local:'Email lokal',retry:'Pengiriman akan dicoba ulang',failed:'Pengiriman gagal',cancelled:'Dibatalkan',whatsapp_manual:'Tidak dipilih'};
 const badge = (value, text) => `<span class="badge ${colors[value] || 'grey'}">${esc(text)}</span>`;
-function finalStatus(d) {return d.sol_status === 'pending' ? (d.customer_status === 'pending' ? 'pending' : 'review') : d.sol_status;}
+function finalStatus(d) {if(d.customer_status==='rejected')return 'rejected';return ['pending','revision_requested'].includes(d.sol_status) ? (d.customer_status === 'pending' ? 'pending' : 'review') : d.sol_status;}
+function activeDocuments(docs=state.documents) {return docs.filter(d=>!historyOutcome(d));}
 function statusBadge(d) {if(d.sol_status==='pending'&&d.customer_status==='rejected')return badge('rejected',labels.rejected);const status = finalStatus(d); return badge(status, status === 'review' ? 'Menunggu Verifikasi' : status === 'pending' ? 'Menunggu nasabah' : solLabels[status]);}
 function toast(message, error=false) {const t = $('#toast');t.textContent=message;t.className='visible'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>{t.className='';},4500);}
 async function api(url, data, raw=false) {
@@ -136,7 +137,7 @@ async function refreshData() {
  const profile=$('#profile-name');if(profile)profile.textContent=state.user.name;updateNavCount();
 }
 function updateNavCount() {
- for(const [route,count] of [['documents',state.documents.filter(d=>finalStatus(d)===(state.user.role==='sol'?'review':'revision_requested')).length],['customer-updates',state.customerUpdates.filter(r=>r.status==='pending').length],['accounts',state.officerAccountRequests.filter(r=>r.status==='pending').length]]){
+ for(const [route,count] of [['documents',state.user.role==='sol'?kpiDocuments('review').length:0],['customer-updates',state.customerUpdates.filter(r=>r.status==='pending').length],['accounts',state.officerAccountRequests.filter(r=>r.status==='pending').length]]){
   const nav=$('.nav [data-route="'+route+'"]');if(!nav)continue;$('.count',nav)?.remove();if(count){const el=document.createElement('span');el.className='count';el.textContent=count;nav.append(el);}
  }
 }
@@ -145,7 +146,7 @@ function renderShell() {
  const user=state.user;const isSOL=user.role==='sol',isBOH=user.role==='boh',isIT=user.role==='it';
  const roleLabel=isIT?'IT':isBOH?'BOH':isSOL?'SOL':'Officer';
  const nav=(route,label,ico,count='')=>`<button type="button" data-route="${route}">${icon(ico)}${label}${count?`<span class="count">${count}</span>`:''}</button>`;
- const waiting=state.documents.filter(d=>finalStatus(d)===(isSOL?'review':'revision_requested')).length;
+ const waiting=isSOL?kpiDocuments('review').length:0;
  app.innerHTML=`<div class="shell nusantara-theme"><aside class="sidebar" id="sidebar">${sidebarBrand()}<button class="btn text icon mobile-close" data-action="menu" aria-label="Tutup navigasi">${icon('close')}</button><div class="nav-label">Menu</div><nav class="nav" aria-label="Navigasi utama">${isIT?nav('accounts','Kelola Akun','people',state.officerAccountRequests.filter(r=>r.status==='pending').length||''):`${nav('dashboard','Dashboard','grid')}${isBOH?'':nav('documents','Pengajuan','file',waiting||'')}${isBOH?'':isSOL?nav('customers','Data Nasabah','people'):nav('initiate','Tambah Pengajuan','plus')}${isSOL||isBOH?nav('customer-updates','Update Data','people',state.customerUpdates.filter(r=>r.status==='pending').length||''):''}${isBOH?nav('accounts','Persetujuan Akun','shield',state.officerAccountRequests.filter(r=>r.status==='pending').length||''):''}${nav('history','History','clock')}${!isBOH&&state.config.mail_mode==='console'?nav('emails','Kotak email lokal','mail'):''}`}${nav('settings','Pengaturan','settings')}</nav><div class="sidebar-bottom"><div class="profile"><div class="avatar">${roleLabel[0]}</div><div><strong id="profile-name">${esc(user.name)}</strong><small>${roleLabel}</small></div><button class="btn text icon" data-action="logout" title="Keluar dari akun" aria-label="Keluar dari akun">${icon('logout')}</button></div></div></aside><button class="menu-overlay" data-action="menu" aria-label="Tutup navigasi"></button><div class="workspace"><header class="topbar"><div class="breadcrumb"><button class="btn text icon mobile-toggle" data-action="menu" aria-label="Buka navigasi" aria-expanded="false" aria-controls="sidebar">${icon('menu')}</button><span>Menu</span>${icon('chevron')}<strong id="breadcrumb-page">Ringkasan</strong></div><div class="topbar-right"><span class="date">${icon('calendar')}<span>${new Intl.DateTimeFormat('id-ID',{dateStyle:'long',timeZone:'Asia/Jakarta'}).format(new Date())}</span></span><span class="role-tag">${roleLabel}</span><button class="btn text icon" data-action="refresh" title="Muat ulang data" aria-label="Muat ulang data">${icon('refresh')}</button></div></header><main class="main" id="main"></main></div></div>`;
 }
 async function renderRoute() {
@@ -156,7 +157,7 @@ async function renderRoute() {
  if(state.route!==route){state.documentDeleteMode=false;state.documentSelected=[];state.customerDeleteMode=false;state.customerEditMode=false;state.customerSelected=[];}
  state.route=route;
  if(state.user.role==='it'&&!['accounts','settings'].includes(route)){go('accounts');return;}
- if(state.user.role==='boh'&&!['dashboard','history','settings','customer-updates','accounts'].includes(route)){go('dashboard');return;}
+ if(state.user.role==='boh'&&!route.startsWith('doc/')&&!['dashboard','history','settings','customer-updates','accounts'].includes(route)){go('dashboard');return;}
  const base=route.split('/')[0];const titles={accounts:state.user.role==='it'?'Kelola Akun':'Persetujuan Akun','customer-updates':'Update Data',archive:'Arsip data',dashboard:'Dashboard',documents:'Pengajuan',history:'History',initiate:'Tambah Pengajuan',customers:'Data Nasabah',emails:'Kotak email lokal',settings:'Pengaturan',doc:'Detail pengajuan',revise:'Revisi surat'};
  $('#breadcrumb-page').textContent=titles[base]||'Dashboard';
  document.querySelectorAll('.nav button').forEach(b=>{const active=b.dataset.route===base||(base==='doc'&&b.dataset.route==='documents');b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
@@ -168,7 +169,7 @@ async function renderRoute() {
   else if(route==='history')renderHistory();
   else if(route==='initiate'&&state.user.role==='petugas')renderDocumentForm();
   else if(base==='doc'){main.innerHTML=notice('Memuat detail pengajuan…');const result=await api('/documents/'+encodeURIComponent(route.split('/')[1]));if(state.route!==route)return;state.detail=result.document;renderDetail();}
-  else if(base==='revise'&&state.user.role==='petugas'){main.innerHTML=notice('Memuat surat untuk revisi…');const result=await api('/documents/'+encodeURIComponent(route.split('/')[1]));if(state.route!==route)return;if(result.document.maker!==state.user.id){go('doc/'+result.document.id);return;}state.detail=result.document;renderDocumentForm(result.document);}
+  else if(base==='revise'){go('doc/'+route.split('/')[1]);return;}
   else if(route==='customers'&&state.user.role==='sol')renderCustomers();
   else if(route==='customer-updates'&&['sol','boh'].includes(state.user.role))renderCustomerUpdates();
   else if(route==='emails'&&state.config.mail_mode==='console'){main.innerHTML=notice('Memuat kotak email lokal…');const result=await api('/outbox');if(state.route!==route)return;state.messages=result.messages;renderEmails();}
@@ -182,10 +183,10 @@ const kpiLabels={total:'Total Pengajuan',pending:'Review Nasabah',review:'Review
 const kpiReviewLabels={all:'Semua Status',pending:'Menunggu',approved:'Disetujui',rejected:'Ditolak'};
 function kpiReviewStatus(key,d) {
  if(key==='pending')return d.customer_status==='pending'?(d.sol_status==='cancelled'?null:'pending'):{confirmed:'approved',rejected:'rejected'}[d.customer_status]||null;
- if(key==='review')return d.sol_status==='pending'?(d.customer_status==='pending'?null:'pending'):['approved','rejected'].includes(d.sol_status)?d.sol_status:null;
+ if(key==='review')return ['pending','revision_requested'].includes(d.sol_status)?(d.customer_status==='pending'?null:'pending'):['approved','rejected'].includes(d.sol_status)?d.sol_status:null;
  return null;
 }
-const kpiDocuments=(key,docs=state.documents,status='pending')=>docs.filter(d=>key==='total'||(status==='all'?kpiReviewStatus(key,d)!==null:kpiReviewStatus(key,d)===status));
+const kpiDocuments=(key,docs=state.documents,status='pending')=>activeDocuments(docs).filter(d=>key==='total'||(status==='all'?kpiReviewStatus(key,d)!==null:kpiReviewStatus(key,d)===status));
 function dashboardCounts(docs) {
  return Object.fromEntries(Object.keys(kpiLabels).map(key=>[key,kpiDocuments(key,docs).length]));
 }
@@ -199,8 +200,8 @@ function viewKpi(key) {
   $('#kpi-result-count').textContent=`${filtered.length} pengajuan`;
   const pages=Math.max(1,Math.ceil(filtered.length/5));page=Math.min(page,pages);
   const start=(page-1)*5,rows=filtered.slice(start,start+5);
-  $('#kpi-documents').innerHTML=rows.length?`<div class="table-wrap"><table class="table submission-table"><thead><tr><th>Nasabah / Dokumen</th><th>Pengaju</th><th>Nominal transaksi</th><th>${stage?'Status review':'Status pengajuan'}</th>${monitoring?'':'<th>Detail</th>'}</tr></thead><tbody>${rows.map(d=>`<tr><td><strong>${esc(d.customer_name)}</strong><small>${esc(d.id)}</small><small>CIF ${esc(d.cif)}</small></td><td>${esc(d.maker_name||'Officer')}</td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td>${stage?badge(kpiReviewStatus(key,d),kpiReviewLabels[kpiReviewStatus(key,d)]):statusBadge(d)}</td>${monitoring?'':`<td><button class="btn icon small" data-action="kpi-open-document" data-id="${esc(d.id)}" aria-label="Lihat detail ${esc(d.id)}" title="Lihat detail">${icon('eye')}</button></td>`}</tr>`).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">${start+1}–${start+rows.length} dari ${filtered.length} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman detail KPI"><button class="btn small" data-kpi-page="-1" ${page===1?'disabled':''}>Sebelumnya</button><span>${page} / ${pages}</span><button class="btn small" data-kpi-page="1" ${page===pages?'disabled':''}>Berikutnya</button></div>`:''}</div>`:empty(query?'Tidak ada pengajuan yang cocok':'Belum ada pengajuan',query?'Ubah pencarian Anda.':'Belum ada pengajuan dalam kategori ini.');
-  labelRecordTables($('#kpi-documents'));
+  $('#kpi-documents').innerHTML=rows.length?`<div class="table-wrap"><table class="table submission-table"><thead><tr><th>Nasabah / Dokumen</th><th>Nominal transaksi</th><th>${stage?'Status review':'Status pengajuan'}</th></tr></thead><tbody>${rows.map(d=>`<tr data-document-row="${esc(d.id)}"><td><strong>${documentName(d)}</strong><small>${esc(d.id)}</small><small>CIF ${esc(d.cif)}</small></td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td>${stage?badge(kpiReviewStatus(key,d),kpiReviewLabels[kpiReviewStatus(key,d)]):statusBadge(d)}</td></tr>`).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">${start+1}–${start+rows.length} dari ${filtered.length} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman detail KPI"><button class="btn small" data-kpi-page="-1" ${page===1?'disabled':''}>Sebelumnya</button><span>${page} / ${pages}</span><button class="btn small" data-kpi-page="1" ${page===pages?'disabled':''}>Berikutnya</button></div>`:''}</div>`:empty(query?'Tidak ada pengajuan yang cocok':'Belum ada pengajuan',query?'Ubah pencarian Anda.':'Belum ada pengajuan dalam kategori ini.');
+  labelRecordTables($('#kpi-documents'));bindDocumentRows($('#kpi-documents'));
  };
  $('#kpi-status')?.addEventListener('change',e=>{status=e.target.value;page=1;draw();});
  $('#kpi-search').addEventListener('input',e=>{query=e.target.value.trim().toLocaleLowerCase('id-ID');page=1;draw();});
@@ -208,7 +209,7 @@ function viewKpi(key) {
  draw();dialog.showModal();
 }
 function renderDashboard(full=false) {
- const sol=state.user.role==='sol',boh=state.user.role==='boh';const docs=state.documents;
+ const sol=state.user.role==='sol',boh=state.user.role==='boh';const docs=activeDocuments();
  const count=status=>docs.filter(d=>finalStatus(d)===status).length;
  const newButton=boh?'':!sol?`<button class="btn primary" data-route="initiate">${icon('plus')} Tambah Pengajuan</button>`:full?`<div class="actions selection-actions">${state.documentDeleteMode?'<button class="btn" data-action="cancel-document-selection">Batal</button>':''}<button class="btn danger" id="delete-selected-documents" data-action="${state.documentDeleteMode?'archive-selected-documents':'select-documents'}" ${docs.length?'':'disabled'}>Hapus</button></div>`:'';
  const dateFilter=`<div class="table-head-tools"><details id="date-picker" class="date-picker"><summary id="date-range-trigger" class="btn ${state.dateFrom?'active':''}" aria-label="Pilih rentang tanggal pengajuan" title="${esc(rangeButtonLabel())}">${icon('calendar')}<span>${esc(rangeButtonLabel())}</span></summary><div id="date-range-panel" class="date-range-panel" role="group" aria-label="Kalender rentang tanggal"></div></details></div>`;
@@ -216,9 +217,9 @@ function renderDashboard(full=false) {
  const stats=[['total','Total Pengajuan','blue'],['pending','Review Nasabah','blue'],['review','Review SOL','yellow']];
  const kpiIcons={total:'file',pending:'people',review:'approval'};
  const updates=state.customerUpdates.filter(r=>r.status==='pending').length;
- const attention=boh?updates:sol?counts.review:count('revision_requested');
- const attentionText=boh?'update data menunggu persetujuan':sol?'pengajuan menunggu pemeriksaan':'pengajuan perlu revisi';
- $('#main').innerHTML=`${!full?`<div class="stats">${stats.map(([key,label,tone])=>`<button type="button" class="card stat stat-${tone}" data-action="view-kpi" data-kpi="${key}" aria-haspopup="dialog" title="Lihat detail ${label}"><span class="stat-icon" aria-hidden="true">${icon(kpiIcons[key])}</span><span class="stat-content"><span class="stat-label"><strong>${label}</strong></span><span class="stat-value" data-stat="${key}">${counts[key]}</span></span></button>`).join('')}</div><div class="task-link" id="dashboard-task" data-count="${attention}" ${attention?'':'hidden'}><span class="task-copy"><span class="task-icon" aria-hidden="true">${icon('clock')}</span><span><strong>${attention}</strong> ${attentionText}</span></span><button class="btn small" data-action="view-attention">Lihat ${icon('arrow')}</button></div>`:''}<section class="card submission-list-card"><div class="card-head"><h2>Daftar Pengajuan</h2>${full?newButton:''}</div><div class="filters submission-filters"><div class="search-box">${icon('search')}<input id="search" class="input" type="search" aria-label="Cari pengajuan" placeholder="Cari nasabah, pengaju, CIF, atau ID dokumen…" value="${esc(state.search)}"></div><select id="filter-status" class="input" aria-label="Filter status"><option value="all">Semua status</option><option value="pending">Menunggu nasabah</option><option value="review">Menunggu Verifikasi</option><option value="approved">Disetujui SOL</option><option value="rejected">Ditolak SOL</option><option value="revision_requested">Perlu revisi</option><option value="cancelled">Dibatalkan</option></select><select id="filter-kind" class="input" aria-label="Filter jenis dokumen"><option value="all">Semua jenis</option><option>Standing Instruction</option><option>Warkat</option></select>${dateFilter}</div><div id="doc-table"></div></section>${state.config.mail_mode==='console'?'<footer class="workspace-footer">Pengujian lokal · Email belum terkirim ke nasabah</footer>':''}`;
+ const attention=boh?updates:sol?counts.review:0;
+ const attentionText=boh?'update data menunggu persetujuan':'pengajuan menunggu pemeriksaan';
+ $('#main').innerHTML=`${!full?`<div class="stats">${stats.map(([key,label,tone])=>`<button type="button" class="card stat stat-${tone}" data-action="view-kpi" data-kpi="${key}" aria-haspopup="dialog" title="Lihat detail ${label}"><span class="stat-icon" aria-hidden="true">${icon(kpiIcons[key])}</span><span class="stat-content"><span class="stat-label"><strong>${label}</strong></span><span class="stat-value" data-stat="${key}">${counts[key]}</span></span></button>`).join('')}</div><div class="task-link" id="dashboard-task" data-count="${attention}" ${attention?'':'hidden'}><span class="task-copy"><span class="task-icon" aria-hidden="true">${icon('clock')}</span><span><strong>${attention}</strong> ${attentionText}</span></span><button class="btn small" data-action="view-attention">Lihat ${icon('arrow')}</button></div>`:''}<section class="card submission-list-card"><div class="card-head"><h2>Daftar Pengajuan</h2>${full?newButton:''}</div><div class="filters submission-filters"><div class="search-box">${icon('search')}<input id="search" class="input" type="search" aria-label="Cari pengajuan" placeholder="Cari nasabah, pengaju, CIF, atau ID dokumen…" value="${esc(state.search)}"></div><select id="filter-status" class="input" aria-label="Filter status"><option value="all">Semua status</option><option value="pending">Menunggu nasabah</option><option value="review">Menunggu Verifikasi</option></select><select id="filter-kind" class="input" aria-label="Filter jenis dokumen"><option value="all">Semua jenis</option><option>Standing Instruction</option><option>Warkat</option></select>${dateFilter}</div><div id="doc-table"></div></section>${state.config.mail_mode==='console'?'<footer class="workspace-footer">Pengujian lokal · Email belum terkirim ke nasabah</footer>':''}`;
  $('#filter-status').value=state.status;$('#filter-kind').value=state.kind;
  $('#search').addEventListener('input',e=>{state.search=e.target.value;state.page=1;renderTable();});
  $('#filter-status').addEventListener('change',e=>{state.status=e.target.value;state.page=1;renderTable();});
@@ -226,6 +227,14 @@ function renderDashboard(full=false) {
  bindDateRange();
  renderTable();
 }
+function bindDocumentRows(root=document) {
+ root.querySelectorAll('[data-document-row]').forEach(row=>row.addEventListener('click',e=>{
+  if(e.target.closest('a,button,input,select,textarea,label,details,summary')||window.getSelection()?.toString())return;
+  if(row.closest('dialog'))dialog.close();
+  state.page=1;go('doc/'+row.dataset.documentRow);
+ }));
+}
+const documentName = d => `<a class="document-row-link" href="#doc/${esc(d.id)}" data-route="doc/${esc(d.id)}" aria-label="Lihat detail ${esc(d.customer_name)} ${esc(d.id)}">${esc(d.customer_name)}</a>`;
 function labelRecordTables(root=document) {
  root.querySelectorAll('.submission-table,.history-table,.customer-table,.customer-updates-table,.account-table').forEach(table=>{
   table.classList.add('record-table');
@@ -243,12 +252,13 @@ function renderTable() {
  if(!$('#doc-table'))return;
  if(state.route==='history')return renderHistoryTable();
  const monitoring=state.user.role==='boh',selectable=state.user.role==='sol'&&state.route==='documents'&&state.documentDeleteMode;
- state.documentSelected=state.documentSelected.filter(id=>state.documents.some(d=>d.id===id&&d.customer_status!=='confirmed'));
- const remove=$('#delete-selected-documents');if(remove){remove.disabled=selectable?!state.documentSelected.length:!state.documents.some(d=>d.customer_status!=='confirmed');remove.textContent=selectable&&state.documentSelected.length?'Hapus ('+state.documentSelected.length+')':'Hapus';}
- let docs=state.documents.filter(d=>matchesSubmissionDate(d)&&(state.status==='all'||finalStatus(d)===state.status)&&(state.kind==='all'||d.kind===state.kind)&&(`${d.customer_name} ${d.maker_name||''} ${d.id} ${d.cif}`.toLowerCase().includes(state.search.toLowerCase())));
+ const active=activeDocuments();
+ state.documentSelected=state.documentSelected.filter(id=>active.some(d=>d.id===id&&d.customer_status!=='confirmed'));
+ const remove=$('#delete-selected-documents');if(remove){remove.disabled=selectable?!state.documentSelected.length:!active.some(d=>d.customer_status!=='confirmed');remove.textContent=selectable&&state.documentSelected.length?'Hapus ('+state.documentSelected.length+')':'Hapus';}
+ let docs=active.filter(d=>matchesSubmissionDate(d)&&(state.status==='all'||finalStatus(d)===state.status)&&(state.kind==='all'||d.kind===state.kind)&&(`${d.customer_name} ${d.maker_name||''} ${d.id} ${d.cif}`.toLowerCase().includes(state.search.toLowerCase())));
  const total=docs.length,pages=Math.max(1,Math.ceil(total/5));state.page=Math.max(1,Math.min(state.page,pages));const start=(state.page-1)*5;docs=docs.slice(start,start+5);const removable=docs.filter(d=>d.customer_status!=='confirmed');
- $('#doc-table').innerHTML=docs.length?`<div class="table-wrap"><table class="table submission-table ${selectable?'submission-selectable':''} ${monitoring?'monitoring-table':''}"><thead><tr>${selectable?`<th class="customer-select"><input id="select-visible-documents" type="checkbox" aria-label="Pilih semua pengajuan di halaman ini" ${removable.length&&removable.every(d=>state.documentSelected.includes(d.id))?'checked':''} ${removable.length?'':'disabled'}></th>`:''}<th>Nasabah / Dokumen</th><th>Pengaju</th><th>Jenis & nominal</th><th>Review Nasabah</th><th>Review SOL</th>${monitoring?'':'<th><span class="muted">Detail</span></th>'}</tr></thead><tbody>${docs.map(d=>`<tr>${selectable?`<td class="customer-select"><input type="checkbox" data-document-select="${esc(d.id)}" aria-label="Pilih pengajuan ${esc(d.customer_name)} ${esc(d.id)}" ${state.documentSelected.includes(d.id)?'checked':''} ${d.customer_status==='confirmed'?'disabled title="Sudah disetujui nasabah"':''}></td>`:''}<td><strong>${esc(d.customer_name)}</strong><small class="mono">${esc(d.id)}</small></td><td>${esc(d.maker_name||'Officer')}</td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td>${badge(d.customer_status,kpiReviewLabels[d.customer_status==='confirmed'?'approved':d.customer_status]||labels[d.customer_status])}</td><td>${badge(d.sol_status,kpiReviewLabels[d.sol_status]||solLabels[d.sol_status])}</td>${monitoring?'':`<td><button class="btn icon small" data-route="doc/${esc(d.id)}" aria-label="Lihat detail ${esc(d.id)}" title="Lihat detail">${icon('eye')}</button></td>`}</tr>`).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">Menampilkan ${start+1}–${start+docs.length} dari ${total} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman daftar pengajuan"><button class="btn small" data-action="page-prev" ${state.page===1?'disabled':''}>${icon('left')} Sebelumnya</button><span>Halaman ${state.page} dari ${pages}</span><button class="btn small" data-action="page-next" ${state.page===pages?'disabled':''}>Berikutnya ${icon('arrow')}</button></div>`:''}</div>`:empty(state.documents.length?'Tidak ada pengajuan yang cocok':'Belum ada pengajuan',state.documents.length?'Ubah pencarian atau filter untuk melihat pengajuan lainnya.':state.user.role!=='petugas'?'Pengajuan dari petugas akan muncul di sini.':'Mulai dengan memilih nasabah dan mengunggah surat.',state.user.role==='petugas'&&!state.documents.length?'<button class="btn primary" data-route="initiate">Buat pengajuan pertama</button>':'');
- labelRecordTables($('#doc-table'));
+ $('#doc-table').innerHTML=docs.length?`<div class="table-wrap"><table class="table submission-table ${selectable?'submission-selectable':''} ${monitoring?'monitoring-table':''}"><thead><tr>${selectable?`<th class="customer-select"><input id="select-visible-documents" type="checkbox" aria-label="Pilih semua pengajuan di halaman ini" ${removable.length&&removable.every(d=>state.documentSelected.includes(d.id))?'checked':''} ${removable.length?'':'disabled'}></th>`:''}<th>Nasabah / Dokumen</th><th>Jenis & nominal</th><th>Review Nasabah</th><th>Review SOL</th></tr></thead><tbody>${docs.map(d=>`<tr data-document-row="${esc(d.id)}">${selectable?`<td class="customer-select"><input type="checkbox" data-document-select="${esc(d.id)}" aria-label="Pilih pengajuan ${esc(d.customer_name)} ${esc(d.id)}" ${state.documentSelected.includes(d.id)?'checked':''} ${d.customer_status==='confirmed'?'disabled title="Sudah disetujui nasabah"':''}></td>`:''}<td><strong>${documentName(d)}</strong><small class="mono">${esc(d.id)}</small></td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td>${badge(d.customer_status,kpiReviewLabels[d.customer_status==='confirmed'?'approved':d.customer_status]||labels[d.customer_status])}</td><td>${badge(d.sol_status,kpiReviewLabels[d.sol_status]||solLabels[d.sol_status])}</td></tr>`).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">Menampilkan ${start+1}–${start+docs.length} dari ${total} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman daftar pengajuan"><button class="btn small" data-action="page-prev" ${state.page===1?'disabled':''}>${icon('left')} Sebelumnya</button><span>Halaman ${state.page} dari ${pages}</span><button class="btn small" data-action="page-next" ${state.page===pages?'disabled':''}>Berikutnya ${icon('arrow')}</button></div>`:''}</div>`:empty(active.length?'Tidak ada pengajuan yang cocok':state.documents.length?'Tidak ada pengajuan yang sedang diproses':'Belum ada pengajuan',active.length?'Ubah pencarian atau filter untuk melihat pengajuan lainnya.':state.documents.length?'Pengajuan yang selesai, ditolak, atau dibatalkan tersedia di History.':state.user.role!=='petugas'?'Pengajuan dari petugas akan muncul di sini.':'Mulai dengan memilih nasabah dan mengunggah surat.',!active.length&&state.documents.length?'<button class="btn" data-route="history">Lihat History</button>':state.user.role==='petugas'&&!state.documents.length?'<button class="btn primary" data-route="initiate">Buat pengajuan pertama</button>':'');
+ labelRecordTables($('#doc-table'));bindDocumentRows($('#doc-table'));
  if(selectable&&docs.length){
   const all=$('#select-visible-documents');all.indeterminate=removable.some(d=>state.documentSelected.includes(d.id))&&!removable.every(d=>state.documentSelected.includes(d.id));
   all.addEventListener('change',e=>{const visible=new Set(removable.map(d=>d.id));state.documentSelected=state.documentSelected.filter(id=>!visible.has(id));if(e.target.checked)state.documentSelected.push(...visible);renderTable();});
@@ -256,14 +266,14 @@ function renderTable() {
  }
 }
 function historyOutcome(d) {
- if(d.sol_status==='approved')return {result:'success',label:'Berhasil',reason:'Disetujui SOL'};
- if(d.sol_status==='rejected')return {result:'failure',label:'Gagal',reason:'Ditolak SOL'};
- if(d.sol_status==='cancelled')return {result:'failure',label:'Gagal',reason:'Dibatalkan petugas'};
- if(d.customer_status==='rejected')return {result:'failure',label:'Gagal',reason:'Ditolak nasabah'};
+ if(d.customer_status==='rejected')return {result:'failure',label:'Ditolak',reason:'Ditolak nasabah'};
+ if(d.sol_status==='rejected')return {result:'failure',label:'Ditolak',reason:'Ditolak SOL'};
+ if(d.sol_status==='cancelled')return {result:'failure',label:'Ditolak',reason:'Pengajuan lama dibatalkan'};
+ if(d.customer_status==='confirmed'&&d.sol_status==='approved')return {result:'success',label:'Berhasil',reason:'Disetujui nasabah dan SOL'};
  return null;
 }
 function renderHistory() {
- $('#main').innerHTML=`<section class="card"><div class="card-head"><h2>History Dokumen</h2></div><div class="filters"><div class="search-box">${icon('search')}<input id="history-search" class="input" type="search" aria-label="Cari history" placeholder="Cari nasabah, pengaju, CIF, atau ID dokumen…" value="${esc(state.historySearch)}"></div><select id="history-result" class="input" aria-label="Filter hasil history"><option value="all">Semua hasil</option><option value="success">Berhasil</option><option value="failure">Gagal</option></select></div><div id="doc-table"></div></section>`;
+ $('#main').innerHTML=`<section class="card"><div class="card-head"><h2>History Pengajuan</h2></div><div class="filters"><div class="search-box">${icon('search')}<input id="history-search" class="input" type="search" aria-label="Cari history" placeholder="Cari nasabah, pengaju, CIF, atau ID dokumen…" value="${esc(state.historySearch)}"></div><select id="history-result" class="input" aria-label="Filter hasil history"><option value="all">Semua hasil</option><option value="success">Berhasil</option><option value="failure">Ditolak</option></select></div><div id="doc-table"></div></section>`;
  $('#history-result').value=state.historyResult;
  $('#history-search').addEventListener('input',e=>{state.historySearch=e.target.value;state.page=1;renderHistoryTable();});
  $('#history-result').addEventListener('change',e=>{state.historyResult=e.target.value;state.page=1;renderHistoryTable();});
@@ -271,12 +281,12 @@ function renderHistory() {
 }
 function renderHistoryTable() {
  const monitoring=state.user.role==='boh';
- const all=state.documents.filter(d=>d.kind==='Standing Instruction'&&historyOutcome(d));
+ const all=state.documents.filter(d=>historyOutcome(d));
  const query=state.historySearch.trim().toLocaleLowerCase('id-ID');
  let docs=all.filter(d=>(state.historyResult==='all'||historyOutcome(d).result===state.historyResult)&&`${d.customer_name} ${d.maker_name||''} ${d.cif} ${d.id}`.toLocaleLowerCase('id-ID').includes(query));
  const total=docs.length,pages=Math.max(1,Math.ceil(total/5));state.page=Math.max(1,Math.min(state.page,pages));const start=(state.page-1)*5;docs=docs.slice(start,start+5);
- $('#doc-table').innerHTML=docs.length?`<div class="table-wrap"><table class="table history-table"><thead><tr><th>Nasabah / Dokumen</th><th>Pengaju</th><th>Nominal transaksi</th><th>Status</th><th>Terakhir diperbarui</th>${monitoring?'':'<th class="history-action-heading">Dokumen</th>'}</tr></thead><tbody>${docs.map(d=>{const outcome=historyOutcome(d);return `<tr><td><strong>${esc(d.customer_name)}</strong><small class="mono">${esc(d.id)}</small><small>CIF ${esc(d.cif)}</small></td><td>${esc(d.maker_name||'Officer')}</td><td><strong class="amount">${rupiah(d.nominal)}</strong></td><td><span class="badge history-${outcome.result}">${outcome.label}</span>${outcome.result==='failure'?`<small>${outcome.reason}</small>`:''}</td><td>${date(d.updated)}</td>${monitoring?'':`<td><div class="actions history-actions"><button class="btn icon small" data-route="doc/${esc(d.id)}" aria-label="Lihat detail ${esc(d.id)}" title="Lihat detail">${icon('eye')}</button>${outcome.result==='success'?`<button class="btn icon small" data-action="download-execution-pdf" data-id="${esc(d.id)}" aria-label="Unduh PDF ${esc(d.id)}" title="Unduh PDF pelaksanaan">${icon('download')}</button>`:''}</div></td>`}</tr>`;}).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">Menampilkan ${start+1}–${start+docs.length} dari ${total} dokumen SI</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman history"><button class="btn small" data-action="page-prev" ${state.page===1?'disabled':''}>${icon('left')} Sebelumnya</button><span>Halaman ${state.page} dari ${pages}</span><button class="btn small" data-action="page-next" ${state.page===pages?'disabled':''}>Berikutnya ${icon('arrow')}</button></div>`:''}</div>`:empty(all.length?'Tidak ada history yang cocok':'Belum ada history SI',all.length?'Ubah pencarian atau filter hasil.':'SI yang disetujui, ditolak, atau dibatalkan akan muncul di sini.');
- labelRecordTables($('#doc-table'));
+ $('#doc-table').innerHTML=docs.length?`<div class="table-wrap"><table class="table history-table"><thead><tr><th>Nasabah / Dokumen</th><th>Nominal transaksi</th><th>Status</th><th>Terakhir diperbarui</th>${monitoring?'':'<th class="history-action-heading">Dokumen</th>'}</tr></thead><tbody>${docs.map(d=>{const outcome=historyOutcome(d);return `<tr data-document-row="${esc(d.id)}"><td><strong>${documentName(d)}</strong><small class="mono">${esc(d.id)}</small><small>CIF ${esc(d.cif)}</small></td><td><strong class="amount">${rupiah(d.nominal)}</strong><small>${esc(d.kind)}</small></td><td><span class="badge history-${outcome.result}">${outcome.label}</span>${outcome.result!=='success'?`<small>${outcome.reason}</small>`:''}</td><td>${date(d.updated)}</td>${monitoring?'':`<td><div class="actions history-actions">${outcome.result==='success'?`<button class="btn icon small" data-action="download-execution-pdf" data-id="${esc(d.id)}" aria-label="Unduh PDF ${esc(d.id)}" title="Unduh PDF pelaksanaan">${icon('download')}</button>`:''}</div></td>`}</tr>`;}).join('')}</tbody></table></div><div class="table-footer"><span aria-live="polite">Menampilkan ${start+1}–${start+docs.length} dari ${total} pengajuan</span>${pages>1?`<div class="table-pagination" role="group" aria-label="Halaman history"><button class="btn small" data-action="page-prev" ${state.page===1?'disabled':''}>${icon('left')} Sebelumnya</button><span>Halaman ${state.page} dari ${pages}</span><button class="btn small" data-action="page-next" ${state.page===pages?'disabled':''}>Berikutnya ${icon('arrow')}</button></div>`:''}</div>`:empty(all.length?'Tidak ada history yang cocok':'Belum ada history',all.length?'Ubah pencarian atau filter hasil.':'Pengajuan yang selesai, ditolak, atau dibatalkan akan muncul di sini.');
+ labelRecordTables($('#doc-table'));bindDocumentRows($('#doc-table'));
 }
 function renderDocumentForm(doc=null) {
  const revision=!!doc;
@@ -322,15 +332,14 @@ function auditHistory(entries,customerName) {
 }
 function renderDocumentProgress(d) {
  const customerReviewed=d.customer_status!=='pending',solReviewed=['approved','rejected'].includes(d.sol_status);
- const active=d.sol_status==='cancelled'||d.customer_status==='rejected'?-1:d.sol_status==='revision_requested'?0:solReviewed?-1:customerReviewed?2:1;
- const solStatus=d.sol_status==='pending'?'Menunggu Verifikasi':solLabels[d.sol_status];
- const steps=[['Pengajuan surat',d.sol_status==='revision_requested'?'Perlu revisi':'Surat diunggah',true],['Review nasabah',labels[d.customer_status],customerReviewed],['Review SOL',solStatus,solReviewed]];
+ const active=historyOutcome(d)?-1:customerReviewed?2:1;
+ const solStatus=['pending','revision_requested'].includes(d.sol_status)?'Menunggu Verifikasi':solLabels[d.sol_status];
+ const steps=[['Pengajuan surat','Surat diunggah',true],['Review nasabah',labels[d.customer_status],customerReviewed],['Review SOL',solStatus,solReviewed]];
  return `<ol class="status-flow" aria-label="Alur pengajuan">${steps.map(([title,status,done],index)=>`<li class="status-step ${index===active?'current':done?'complete':''}" ${index===active?'aria-current="step"':''}><span class="status-step-marker">${done&&index!==active?icon('check'):index+1}</span><div class="status-step-copy"><strong>${title}</strong><span>${esc(status)}</span></div></li>`).join('')}</ol>`;
 }
 function renderSolDecision(d) {
- const ready=d.sol_status==='pending'&&d.customer_status!=='pending';
- const canContinue=d.customer_status==='confirmed';
- return `<div class="sol-decision-panel"><h3>Keputusan SOL</h3>${d.sol_notes?notice(`<strong>Catatan SOL</strong><p>${esc(d.sol_notes)}</p>`,d.sol_status==='revision_requested'?'warn':''):''}${ready?`<div class="review-actions ${canContinue?'':'review-actions-terminal'}">${canContinue?`<button class="btn primary" data-action="sol-review" data-decision="approved">${icon('check')} Setujui pengajuan</button><button class="btn amber" data-action="sol-review" data-decision="revision_requested">${icon('edit')} Minta revisi</button>`:''}<button class="btn danger" data-action="sol-review" data-decision="rejected">${icon('close')} Tolak pengajuan</button></div>`:`<p class="muted">${d.sol_status==='pending'?'Menunggu respons nasabah.':'Keputusan SOL sudah tercatat.'}</p>`}</div>`;
+ const ready=['pending','revision_requested'].includes(d.sol_status)&&d.customer_status==='confirmed';
+ return `<div class="sol-decision-panel"><h3>Keputusan SOL</h3>${d.sol_notes?notice(`<strong>Catatan SOL</strong><p>${esc(d.sol_notes)}</p>`):''}${ready?`<div class="review-actions"><button class="btn primary" data-action="sol-review" data-decision="approved">${icon('check')} Setujui pengajuan</button><button class="btn danger" data-action="sol-review" data-decision="rejected">${icon('close')} Tolak pengajuan</button></div>`:`<p class="muted">${d.customer_status==='rejected'?'Pengajuan ditolak nasabah.':historyOutcome(d)?'Keputusan sudah tercatat.':'Menunggu respons nasabah.'}</p>`}</div>`;
 }
 function verificationStatus(d) {
  if(d.sol_status==='cancelled')return 'Link Konfirmasi dinonaktifkan.';
@@ -339,8 +348,8 @@ function verificationStatus(d) {
 }
 function renderOfficerFollowup(d) {
  if(d.maker!==state.user.id)return `<section class="card detail-section-card review-card"><div class="card-head detail-card-head"><div class="detail-card-title"><span class="detail-card-icon blue">${icon('shield')}</span><h2>Link Verifikasi</h2></div></div><div class="card-pad stack"><div class="verification-status-row"><label class="muted">Status</label><p><strong>${esc(verificationStatus(d))}</strong></p></div><p class="muted">Tindak lanjut pengajuan dilakukan oleh ${esc(d.maker_name||'Officer pembuat')}.</p></div></section>`;
- const canRemove=d.customer_status!=='confirmed';const canResend=d.customer_status==='pending'&&d.sol_status==='pending';const available=confirmationAvailability(d);const customer=state.customers.find(c=>c.cif===d.cif);const canSend=available.email||(available.whatsapp&&!!customer?.phone);
- return `<section class="card detail-section-card review-card"><div class="card-head detail-card-head"><div class="detail-card-title"><span class="detail-card-icon blue">${icon('shield')}</span><h2>Link Verifikasi</h2></div></div><div class="card-pad stack">${d.sol_notes?notice(`<strong>Catatan SOL</strong><p>${esc(d.sol_notes)}</p>`,d.sol_status==='revision_requested'?'warn':''):''}${d.sol_status==='revision_requested'&&d.customer_status==='confirmed'?`<p class="muted">Perbaiki surat sesuai catatan SOL, lalu kirim ulang untuk konfirmasi nasabah.</p><button class="btn primary" data-route="revise/${esc(d.id)}">${icon('edit')} Unggah revisi surat</button>`:canResend?'':`<p class="muted">${d.sol_status==='cancelled'?'Pengajuan dibatalkan.':'Respons nasabah sudah tercatat.'}</p>`}<div class="detail-email stack"><div class="verification-status-row"><label class="muted">Status</label><p><strong>${esc(verificationStatus(d))}</strong></p></div>${d.mail?.error?notice(esc(d.mail.error),'error'):''}</div><div class="detail-followup-actions">${state.config.whatsapp_manual&&canResend?`<button class="btn primary" data-action="send-verification" ${canSend?'':'disabled'}>${icon('mail')} Kirim konfirmasi</button>`:''}${canRemove&&['pending','revision_requested'].includes(d.sol_status)?'<button class="btn danger" data-action="cancel-document">Batalkan pengajuan</button>':''}${canResend?`<button class="btn" data-action="resend" ${resendIsReady(d)?'':'disabled'} title="${resendIsReady(d)?'Buat tautan konfirmasi baru':`Tersedia mulai ${date(d.resend_available_at*1000)} atau saat link kedaluwarsa`}">${icon('refresh')} Kirim ulang</button>`:''}</div></div></section>`;
+ const canResend=d.customer_status==='pending'&&d.sol_status==='pending';const available=confirmationAvailability(d);const customer=state.customers.find(c=>c.cif===d.cif);const canSend=available.email||(available.whatsapp&&!!customer?.phone);
+ return `<section class="card detail-section-card review-card"><div class="card-head detail-card-head"><div class="detail-card-title"><span class="detail-card-icon blue">${icon('shield')}</span><h2>Link Verifikasi</h2></div></div><div class="card-pad stack">${d.sol_notes?notice(`<strong>Catatan SOL</strong><p>${esc(d.sol_notes)}</p>`,d.sol_status==='revision_requested'?'warn':''):''}${canResend?'':'<p class="muted">Respons nasabah sudah tercatat.</p>'}<div class="detail-email stack"><div class="verification-status-row"><label class="muted">Status</label><p><strong>${esc(verificationStatus(d))}</strong></p></div>${d.mail?.error?notice(esc(d.mail.error),'error'):''}</div><div class="detail-followup-actions">${state.config.whatsapp_manual&&canResend?`<button class="btn primary" data-action="send-verification" ${canSend?'':'disabled'}>${icon('mail')} Kirim konfirmasi</button>`:''}${canResend?`<button class="btn" data-action="resend" ${resendIsReady(d)?'':'disabled'} title="${resendIsReady(d)?'Buat tautan konfirmasi baru':`Tersedia mulai ${date(d.resend_available_at*1000)} atau saat link kedaluwarsa`}">${icon('refresh')} Kirim ulang</button>`:''}</div></div></section>`;
 }
 function sendVerification() {
  const d=state.detail;const available=confirmationAvailability(d);
@@ -356,7 +365,9 @@ function showWhatsAppPreview(preview) {
  dialog.showModal();
 }
 function renderDetail() {
- const d=state.detail;const sol=state.user.role==='sol';const canDownload=d.sol_status==='approved'&&d.customer_status==='confirmed';
+ const d=state.detail;const sol=state.user.role==='sol';const canDownload=state.user.role!=='boh'&&d.sol_status==='approved'&&d.customer_status==='confirmed';
+ const detailNav=historyOutcome(d)?'history':state.user.role==='boh'?'dashboard':'documents';
+ document.querySelectorAll('.nav [data-route]').forEach(button=>{const active=button.dataset.route===detailNav;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
  const customer=state.customers.find(c=>c.cif===d.cif);
  const activities=d.audit.filter(a=>a.action!=='Email diterima server SMTP');
  const field=(label,value,symbol)=>`<div class="detail-data-row"><dt><span class="detail-field-icon">${icon(symbol)}</span><span>${label}</span></dt><dd>${esc(value||'Belum tercatat')}</dd></div>`;
@@ -365,10 +376,10 @@ function renderDetail() {
  ${renderDocumentProgress(d)}
  <div class="detail-card-stack">
  <section class="card detail-section-card">${cardHead('Informasi Pengajuan','file')}<div class="detail-summary-grid"><div class="detail-summary-cell"><span class="detail-summary-symbol">${icon('file')}</span><dl><dt>Nomor SI</dt><dd class="detail-id-value"><span id="detail-document-id">${esc(d.id)}</span><button class="btn icon small" data-action="copy-document-id" aria-label="Salin nomor SI" title="Salin nomor SI">${icon('copy')}</button></dd></dl></div><div class="detail-summary-cell"><span class="detail-summary-symbol">${icon('calendar')}</span><dl><dt>Dibuat pada</dt><dd>${date(d.created)}</dd></dl></div><div class="detail-summary-cell"><span class="detail-summary-symbol purple">${icon('file')}</span><dl><dt>Jenis dokumen</dt><dd>${esc(d.kind)}</dd></dl></div></div></section>
- <section class="card detail-section-card">${cardHead('Data Nasabah','people')}<div class="detail-paired-data"><dl>${field('Nama nasabah',d.customer_name,'person')}${field('Jabatan',d.person,'briefcase')}${field('Nomor rekening',d.account,'payment')}</dl><dl>${field('CIF',d.cif,'identity')}${field('Email',d.email,'mail')}${field('No HP',customer?.phone||'Belum diisi','phone')}</dl></div></section>
+ <section class="card detail-section-card">${cardHead('Data Nasabah','people')}<div class="detail-paired-data"><dl>${field('Nama nasabah',d.customer_name,'person')}${field('Jabatan',d.person,'briefcase')}${field('Nomor rekening',d.account,'payment')}</dl><dl>${field('CIF',d.cif,'identity')}${field('Email',d.email,'mail')}${field('No HP',customer?.phone||d.phone||'Belum diisi','phone')}</dl></div></section>
  <section class="card detail-section-card detail-transaction-card">${cardHead('Informasi Transaksi','payment','green')}<div class="detail-paired-data"><dl>${field('Nominal transaksi',rupiah(d.nominal),'payment')}${field('Rekening tujuan',d.destination_account,'payment')}</dl><dl>${field('Nama Rekening Tujuan',d.destination_name,'person')}${field('Keterangan',d.description||'—','info')}</dl></div></section>
  <section class="card detail-section-card detail-document-card">${cardHead('Dokumen Transaksi','attachment','purple')}<div class="card-pad"><div class="detail-file-row"><span class="detail-file-icon">${icon('file')}</span><strong>${esc(d.file.filename)}</strong><div class="actions"><button class="btn small" data-action="download-file">${icon('download')} Unduh</button><button class="btn small detail-preview-button" data-action="preview-file">${icon('eye')} Lihat</button></div></div><div id="preview-container"></div></div></section>
- ${sol?`<section class="card detail-section-card detail-decision-card">${cardHead('Keputusan SOL','shield')}<div class="card-pad">${renderSolDecision(d)}</div></section>`:renderOfficerFollowup(d)}
+ ${sol?`<section class="card detail-section-card detail-decision-card">${cardHead('Keputusan SOL','shield')}<div class="card-pad">${renderSolDecision(d)}</div></section>`:state.user.role==='petugas'?renderOfficerFollowup(d):''}
  <section class="card detail-section-card detail-activity-card">${cardHead('Log Aktivitas','clock','blue',`<small class="muted">${activities.length} aktivitas</small>`)}${auditHistory(activities,d.customer_name)}</section></div>`;
 }
 function renderCustomers() {
@@ -511,14 +522,13 @@ function showDeliveryDialog(body,customer,onConfirm,options={}) {
  $('#delivery-confirm').addEventListener('click',async()=>{const choice=channel();if(!available[choice])return;const controls=[...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled)')];controls.forEach(el=>el.disabled=true);$('#dialog-error').textContent='';try{const preview=await onConfirm(choice);dialog.close();if(preview)showWhatsAppPreview(preview);}catch(err){$('#dialog-error').textContent=err.message;controls.forEach(el=>el.disabled=false);}});
 }
 async function review(decision) {
- const d=state.detail;const needsReason=decision!=='approved';
- const titles={approved:'Setujui pengajuan?',rejected:'Tolak pengajuan?',revision_requested:'Minta revisi surat?'};
- const reasonLabel=decision==='revision_requested'?'Alasan revisi':'Alasan penolakan';
- showDialog(titles[decision],`<p>${esc(d.id)}<br><strong>${esc(d.customer_name)} · ${rupiah(d.nominal)}</strong></p>${needsReason?`<div class="field"><label for="sol-review-reason">${reasonLabel} <span class="required">*</span></label><textarea id="sol-review-reason" maxlength="1500" required placeholder="${decision==='revision_requested'?'Jelaskan bagian surat yang perlu diperbaiki':'Jelaskan alasan penolakan'}"></textarea></div>`:'<p>Keputusan akan dicatat untuk surat ini.</p>'}`,async()=>{
-  const input=$('#sol-review-reason');const notes=needsReason?input.value.trim():'';
-  if(needsReason&&!notes){input.focus();throw new Error(`Isi ${reasonLabel.toLowerCase()} terlebih dahulu.`);}
+ if(!['approved','rejected'].includes(decision))return;
+ const d=state.detail,needsReason=decision==='rejected';
+ showDialog(needsReason?'Tolak pengajuan?':'Setujui pengajuan?',`<p>${esc(d.id)}<br><strong>${esc(d.customer_name)} · ${rupiah(d.nominal)}</strong></p>${needsReason?'<div class="field"><label for="sol-review-reason">Alasan penolakan <span class="required">*</span></label><textarea id="sol-review-reason" maxlength="1500" required placeholder="Jelaskan alasan penolakan"></textarea></div>':'<p>Keputusan akan dicatat untuk surat ini.</p>'}`,async()=>{
+  const input=$('#sol-review-reason'),notes=needsReason?input.value.trim():'';
+  if(needsReason&&!notes){input.focus();throw new Error('Isi alasan penolakan terlebih dahulu.');}
   await api('/documents/'+d.id+'/review',{version:d.version,decision,notes});await refreshData();toast('Keputusan SOL berhasil dicatat.');await renderRoute();
- },decision==='approved'?'Ya, setujui':decision==='rejected'?'Tolak pengajuan':'Kirim permintaan revisi',decision==='rejected'?'danger':decision==='revision_requested'?'amber':'primary');
+ },needsReason?'Tolak pengajuan':'Ya, setujui',needsReason?'danger':'primary');
  if(needsReason){const input=$('#sol-review-reason');input.focus();input.addEventListener('input',()=>{$('#dialog-error').textContent='';});}
 }
 let previewUrl=null;
@@ -565,14 +575,14 @@ function renderPortalResult(decision,d) {
 }
 async function handleAction(e) {
  const target=e.target.closest('[data-route],[data-action],[data-mail]');if(!target)return;
- if(target.dataset.route){state.page=1;go(target.dataset.route);return;}
+ if(target.dataset.route){e.preventDefault();if(target.closest('dialog'))dialog.close();state.page=1;go(target.dataset.route);return;}
  if(target.dataset.mail){state.mailId=target.dataset.mail;renderEmails();return;}
  const action=target.dataset.action;
  try{
  if(action==='view-kpi')viewKpi(target.dataset.kpi);
- else if(action==='kpi-open-document'){if(state.user.role==='boh')return;dialog.close();go('doc/'+target.dataset.id);}
+ else if(action==='kpi-open-document'){dialog.close();go('doc/'+target.dataset.id);}
  else if(action==='page-prev'||action==='page-next'){state.page+=action==='page-next'?1:-1;renderTable();}
- else if(action==='view-attention'){if(state.user.role==='boh')state.customerUpdateFilter='pending';state.search='';state.kind='all';state.dateFrom='';state.dateTo='';state.status=state.user.role==='sol'?'review':'revision_requested';state.page=1;go(state.user.role==='boh'?'customer-updates':'documents');}
+ else if(action==='view-attention'){if(state.user.role==='boh')state.customerUpdateFilter='pending';state.search='';state.kind='all';state.dateFrom='';state.dateTo='';state.status=state.user.role==='sol'?'review':'pending';state.page=1;go(state.user.role==='boh'?'customer-updates':'documents');}
  else if(action==='demo'){$('#login-email').value=target.dataset.role+'@bpip.local';$('#login-password').value=target.dataset.role==='petugas'?'PetugasDemo!2026':'SolDemo!2026';}
  else if(action==='reload')location.reload();
  else if(action==='menu')setMenuOpen(!$('#sidebar').classList.contains('open'),true);
@@ -602,7 +612,7 @@ async function handleAction(e) {
  else if(action==='select-documents'){state.documentDeleteMode=true;state.documentSelected=[];renderDashboard(true);}
  else if(action==='cancel-document-selection'){state.documentDeleteMode=false;state.documentSelected=[];renderDashboard(true);}
  else if(action==='archive-selected-documents'){const selected=state.documents.filter(d=>state.documentSelected.includes(d.id));if(!selected.length)return;showDialog('Hapus pengajuan',`<div class="customer-delete"><p class="customer-delete-question">Apakah Anda yakin akan menghapus ${selected.length===1?'pengajuan ini':selected.length+' pengajuan ini'}?</p><div class="customer-delete-list">${selected.map(d=>`<div class="customer-delete-item"><div><span>Nama nasabah</span><strong>${esc(d.customer_name)}</strong></div><div><span>Nomor pengajuan</span><strong class="mono">${esc(d.id)}</strong></div></div>`).join('')}</div><p class="customer-delete-note">Pengajuan dihapus dari daftar aktif. Surat dan catatan aktivitas tetap tersimpan. Tautan konfirmasi dinonaktifkan.</p></div>`,async()=>{await api('/documents/archive-selected',{documents:selected.map(d=>({id:d.id,version:d.version})),password:$('#action-password').value});state.documentSelected=[];state.documentDeleteMode=false;await refreshData();renderDashboard(true);toast('Pengajuan terpilih berhasil dihapus dari daftar.');},'Hapus pengajuan','danger');}
- else if(action==='cancel-document'){const d=state.detail;showDialog('Batalkan pengajuan?', '<p>Riwayat dan surat tetap tersimpan. Tautan konfirmasi dinonaktifkan. Email yang sudah terkirim tidak dapat ditarik kembali.</p><div class="field"><label for="cancel-notes">Alasan pembatalan</label><textarea id="cancel-notes" maxlength="1500" required></textarea></div>',async()=>{const notes=$('#cancel-notes').value.trim();if(!notes)throw new Error('Isi alasan pembatalan.');await api('/documents/'+d.id+'/cancel',{version:d.version,notes});await refreshData();await renderRoute();toast('Pengajuan dibatalkan.');},'Batalkan pengajuan','danger');}
+
  else if(action==='resend'){const d=state.detail;showDeliveryDialog('<p>Tautan sebelumnya akan dibatalkan dan diganti dengan tautan konfirmasi baru.</p>',state.customers.find(c=>c.cif===d.cif),async channel=>{const result=await api('/documents/'+d.id+'/resend',{version:d.version,channel});await refreshData();await renderRoute();toast(channel==='whatsapp'?'Pesan WhatsApp baru siap dikirim.':'Email baru masuk antrean.');return result.whatsapp;});}
  }catch(err){target.disabled=false;toast(err.message,true);if(err.status===401&&!state.route.startsWith('confirm/'))renderLogin();}
 }
@@ -620,7 +630,7 @@ setInterval(async()=>{
     const counts=dashboardCounts(state.documents);
     document.querySelectorAll('[data-stat]').forEach(el=>{el.textContent=counts[el.dataset.stat];});
     const boh=state.user.role==='boh',sol=state.user.role==='sol';
-    const attention=boh?state.customerUpdates.filter(r=>r.status==='pending').length:sol?counts.review:state.documents.filter(d=>finalStatus(d)==='revision_requested').length;
+    const attention=boh?state.customerUpdates.filter(r=>r.status==='pending').length:sol?counts.review:0;
     const task=$('#dashboard-task');
     if(task&&task.dataset.count!==String(attention)){task.dataset.count=attention;task.hidden=!attention;$('strong',task).textContent=attention;}
    }

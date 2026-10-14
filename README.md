@@ -22,20 +22,21 @@ Akun lokal SOL: `sol@bpip.local`, password `SolDemo!2026`.
 3. Centang pernyataan pemeriksaan lalu kirim konfirmasi.
 4. Buka Kotak email lokal. Buka halaman konfirmasi nasabah di tab baru.
 5. Periksa surat; centang pernyataan dan pilih Setujui/Tolak. Penolakan memerlukan alasan.
-6. Keluar dari akun petugas lalu masuk sebagai SOL. Buka Antrean review dan pengajuan tersebut.
-7. Pilih Approval, Tolak, atau Minta revisi surat. Catatan wajib untuk penolakan/revisi.
-8. Jika diminta revisi, masuk sebagai petugas. Buka pengajuan, pilih Unggah revisi surat, isi ringkasan perbaikan, lalu unggah surat terbaru.
-9. Nasabah mendapatkan tautan baru. Versi sebelumnya tetap di riwayat, tetapi tautannya tidak dapat digunakan.
+6. Keluar dari akun petugas lalu masuk sebagai SOL. Klik baris pengajuan untuk membuka detail dan surat.
+7. Pilih Setujui atau Tolak. Catatan wajib untuk penolakan.
+8. Pengajuan selesai atau ditolak masuk History; gunakan filter Berhasil/Ditolak. Dokumen pelaksanaan dapat diunduh setelah nasabah dan SOL menyetujui.
+
 
 Data tersimpan pada `data/bpip.sqlite3` dan bertahan saat server dimatikan. Akun/data demo hanya dibuat ketika database belum memiliki akun. Mengaktifkan `--demo` pada database yang sudah berisi akun tidak mengubah password akun tersebut. Prototipe awal disimpan di `prototype-original/`.
 
 ## Perilaku aplikasi
 
-- Semua Officer melihat daftar pengajuan dan history bersama, dengan nama pengaju sebagai pembeda. Hanya Officer pembuat yang dapat mengirim konfirmasi, merevisi, atau membatalkan pengajuannya. SOL melihat seluruh pengajuan. Pembatasan tindakan diberlakukan oleh backend.
+- Semua Officer melihat daftar pengajuan dan history bersama. Nama pengaju ditampilkan di halaman detail; daftar tetap ringkas tanpa kolom Pengaju. Hanya Officer pembuat yang dapat mengirim konfirmasi dan menerbitkan ulang link pengajuannya. Officer, SOL, dan BOH membuka detail dengan klik baris pengajuan. BOH membaca detail dan surat tanpa tindakan operasional. Pembatasan tindakan diberlakukan oleh backend.
 - Nasabah tidak membutuhkan akun web; akses melalui token acak 256 bit, berumur 24 jam dan sekali keputusan. Pembukaan email/tautan tidak memberikan persetujuan otomatis.
+- Dashboard dan Pengajuan hanya menampilkan pengajuan yang masih diproses. Persetujuan nasabah dan SOL masuk History sebagai Berhasil; penolakan salah satunya masuk sebagai Ditolak. Pengajuan lama yang dibatalkan tetap tersimpan dalam kelompok Ditolak; filter pembatalan tidak tersedia. Standing Instruction dan Warkat mengikuti aturan yang sama; angka KPI dan antrean hanya menghitung pengajuan aktif. Data, surat, dan audit tetap tersimpan.
 - Konfirmasi nasabah dan keputusan SOL merupakan dua status yang berbeda. Nasabah setuju belum berarti pengajuan telah disetujui SOL.
-- SOL dapat mereview setelah nasabah setuju **atau menolak**. Approval hanya tersedia setelah nasabah setuju. Penolakan nasabah hanya dapat ditutup dengan penolakan SOL; pengajuan tidak dapat disetujui atau diminta revisi.
-- Revisi mengunggah surat baru, menyimpan versi lama, membatalkan tautan sebelumnya, dan meminta konfirmasi nasabah ulang. Keputusan akhir SOL tidak dapat diedit.
+- SOL hanya dapat menyetujui atau menolak setelah nasabah menyetujui surat. Penolakan nasabah langsung masuk History dan menghentikan alur persetujuan. Backend tetap mengizinkan SOL mencatat penolakan penutup pada data lama yang ditolak nasabah.
+- Permintaan revisi dan pembatalan Officer dinonaktifkan pada UI dan API. Pengajuan lama yang menunggu revisi dapat diselesaikan SOL dengan Setujui/Tolak; file dan audit lamanya tetap tersimpan. Keputusan akhir SOL tidak dapat diedit.
 - Kirim tautan baru tersedia saat menunggu nasabah, dengan jeda minimum satu menit. Tautan lama dibatalkan. Penerbitan tautan baru menggunakan nomor versi berikutnya untuk mengikat token ke snapshot surat.
 - Email antrean diproses worker setiap dua detik. Kegagalan mencoba ulang dengan jeda bertambah, maksimal lima percobaan. Status `sent` berarti diterima server SMTP, bukan bukti email dibaca atau masuk inbox. SMTP tidak menjamin pengiriman tepat satu kali; retry setelah koneksi terputus dapat menghasilkan email duplikat, tetapi keputusan nasabah tetap hanya sekali.
 - Dashboard disinkronkan setiap sepuluh detik. Filter pencarian, jenis surat dan status tersedia. Jika catatan SOL sedang diisi, detail tidak ditimpa otomatis; gunakan tombol Perbarui setelah selesai.
@@ -112,10 +113,11 @@ Konfigurasi, domain dan kredensial SMTP/hosting belum tersedia dalam proyek ini;
 
 ```sh
 python3 -m unittest discover -s tests -v
+node --test tests/test_submission_lists.js
 node --check web/js/app.js
 ```
 
-Tes menggunakan server HTTP sementara dan database terpisah. Mencakup alur revisi/approval, penolakan nasabah, RBAC/ownership, CSRF/origin, validasi nominal/file/rekening tujuan, migrasi data lama, tautan kedaluwarsa dan pembatalan token, dua keputusan bersamaan, persistensi, outbox lokal, SMTP dengan mock, retry gagal, password/sesi dan limit login. Tidak mengirim email nyata. Surat contoh yang disediakan hanya untuk pengujian.
+Tes menggunakan server HTTP sementara dan database terpisah. Mencakup alur approval/penolakan, pemisahan daftar aktif dan History, penonaktifan revisi/pembatalan, penolakan nasabah, RBAC/ownership, CSRF/origin, validasi nominal/file/rekening tujuan, migrasi data lama, tautan kedaluwarsa dan pembatalan token, dua keputusan bersamaan, persistensi, outbox lokal, SMTP dengan mock, retry gagal, password/sesi dan limit login. Tidak mengirim email nyata. Surat contoh yang disediakan hanya untuk pengujian.
 
 Rekening tujuan dan atas nama rekening tujuan wajib diisi untuk setiap pengajuan baru dan revisi, baik Standing Instruction maupun Warkat. Nomor tujuan disimpan sebagai teks agar nol di depan tetap utuh (rekening BRI, tepat 15 digit angka); nama pemilik maksimal 250 karakter. Keduanya tersimpan pada setiap versi dan ditampilkan pada email, konfirmasi nasabah, detail pengajuan, serta PDF pelaksanaan. Startup menambahkan kolom secara otomatis tanpa menghapus data lama; rekening tujuan pada pengajuan lama yang belum dicatat ditampilkan sebagai “Belum tercatat”.
 
@@ -129,7 +131,7 @@ Pencarian nama nasabah atau CIF tersedia pada tabel Data nasabah (SOL) dan formu
 
 SOL menghapus nasabah/pengajuan ke arsip dengan password akun yang sedang login. Tombol Pulihkan membuka daftar arsip untuk pemulihan per data. Hapus permanen hanya tersedia di arsip, memerlukan password SOL serta CIF/ID yang diketik ulang. Penghapusan master nasabah mempertahankan snapshot surat dan pengajuan lama. Penghapusan permanen pengajuan menghapus dokumen, semua file versinya, dan antrean email; catatan audit tetap disimpan. Tautan lama tidak diaktifkan kembali saat pemulihan.
 
-Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun BOH melalui SOL sudah dinonaktifkan. BOH dapat membaca ringkasan dashboard semua pengajuan, memutuskan pembaruan data nasabah dari SOL, dan mengelola password akun sendiri. API BOH tetap menolak akses daftar master nasabah, surat, audit pengajuan, email, pembuatan transaksi, dan tindakan operasional SOL. Data nasabah lama dan usulan perubahan tersedia hanya pada daftar persetujuan nasabah bagi SOL dan BOH.
+Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun BOH melalui SOL sudah dinonaktifkan. BOH dapat membaca ringkasan dashboard, detail, surat, dan audit semua pengajuan, memutuskan pembaruan data nasabah dari SOL, dan mengelola password akun sendiri. API BOH tetap menolak akses daftar master nasabah, PDF pelaksanaan, email, pembuatan transaksi, dan tindakan operasional SOL. Data nasabah lama dan usulan perubahan tersedia hanya pada daftar persetujuan nasabah bagi SOL dan BOH.
 
 ### Pengiriman email dan Inbox
 

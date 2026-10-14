@@ -240,7 +240,7 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .review-card textarea { min-height: 104px; }
 .review-actions { display: grid; gap: 12px; }
 .sol-decision-panel { display: grid; gap: 16px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
-.sol-decision-panel .review-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sol-decision-panel .review-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sol-decision-panel .btn { white-space: normal; }
 .review-actions .btn { width: 100%; min-height: 46px; }
 .detail-email { gap: 12px; font-size: var(--text-size); }
@@ -626,7 +626,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .detail-preview-button { border-color: #aac7ff; color: #075ad3; background: #f5f9ff; }
 .detail-decision-card .sol-decision-panel { margin: 0; padding: 0; border: 0; }
 .detail-decision-card .sol-decision-panel > h3 { display: none; }
-.detail-decision-card .review-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.detail-decision-card .review-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .detail-decision-card .review-actions .btn { min-height: 46px; font-size: 14px; font-weight: 600; }
 .detail-decision-card .review-actions-terminal { grid-template-columns: minmax(0, 1fr); }
 .detail-activity-card .timeline { padding: 22px 28px; }
@@ -899,3 +899,8 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
  .account-requests-table td:nth-child(4) { white-space: normal; }
  .account-request-details > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
+
+/* Open submission details from the row, with a keyboard-accessible name link. */
+.table tr[data-document-row] { cursor: pointer; }
+.document-row-link { color: inherit; font-weight: 600; }
+.document-row-link:hover { text-decoration: underline; }
