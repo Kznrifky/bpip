@@ -31,7 +31,7 @@ Data tersimpan pada `data/bpip.sqlite3` dan bertahan saat server dimatikan. Akun
 
 ## Perilaku aplikasi
 
-- Petugas melihat dan memperbaiki pengajuan miliknya. SOL melihat seluruh pengajuan. Pembatasan akses diberlakukan oleh backend.
+- Semua Officer melihat daftar pengajuan dan history bersama, dengan nama pengaju sebagai pembeda. Hanya Officer pembuat yang dapat mengirim konfirmasi, merevisi, atau membatalkan pengajuannya. SOL melihat seluruh pengajuan. Pembatasan tindakan diberlakukan oleh backend.
 - Nasabah tidak membutuhkan akun web; akses melalui token acak 256 bit, berumur 24 jam dan sekali keputusan. Pembukaan email/tautan tidak memberikan persetujuan otomatis.
 - Konfirmasi nasabah dan keputusan SOL merupakan dua status yang berbeda. Nasabah setuju belum berarti pengajuan telah disetujui SOL.
 - SOL dapat mereview setelah nasabah setuju **atau menolak**. Approval hanya tersedia setelah nasabah setuju. Penolakan nasabah hanya dapat ditutup dengan penolakan SOL; pengajuan tidak dapat disetujui atau diminta revisi.
@@ -81,9 +81,11 @@ Password dapat diganti di menu Pengaturan. Sesi lain dicabut setelah perubahan p
 
 IT membuka **Kelola Akun → Ajukan akun Officer**, mengisi nama, email, serta kata sandi awal minimal 12 karakter. Akun belum dapat login selama statusnya **Menunggu BOH**. BOH membuka **Persetujuan Akun → Periksa** dan memilih **Setujui akun** atau **Tolak** dengan alasan. Persetujuan membuat akun dengan role Officer; penolakan tidak membuat akun. Keputusan hanya dapat diberikan sekali dan email yang sedang menunggu tidak dapat diajukan dua kali.
 
-IT dapat memilih **Ubah nama** pada daftar **Akun Officer Aktif**. Perubahan mempertahankan email, kata sandi, role, ID akun, dan kepemilikan pengajuan. Nama baru muncul pada sesi Officer saat data diperbarui. Pembuatan, keputusan BOH, serta perubahan nama dicatat dalam audit pengelolaan. API pengelolaan tidak mengembalikan kata sandi atau hash; hash sementara hanya disimpan sampai pengajuan diputuskan.
+IT memilih **Edit** pada daftar **Akun Officer Aktif**, lalu mengajukan nama baru ke BOH. Nama lama tetap berlaku sampai BOH menyetujui perubahan. Perubahan mempertahankan email, kata sandi, role, ID akun, dan kepemilikan pengajuan. Nama baru muncul pada sesi Officer saat data diperbarui dan pada kolom Pengaju. Pembuatan, keputusan BOH, serta perubahan nama dicatat dalam audit pengelolaan. API pengelolaan tidak mengembalikan kata sandi atau hash; hash sementara hanya disimpan sampai pengajuan diputuskan.
 
-IT memiliki akses pengelolaan akun Officer dan kata sandi sendiri. Role ini tidak memiliki akses data nasabah, transaksi, surat, laporan PDF, atau antrean email. SOL dan Officer tidak dapat mengajukan, menyetujui, maupun mengganti nama akun. BOH tidak dapat membuat akun langsung atau mengganti nama Officer.
+IT memilih **Hapus**, mengisi alasan, lalu mengajukan penghapusan ke BOH. Akun tetap aktif selama menunggu. Persetujuan BOH menonaktifkan akun dan mencabut seluruh sesinya, sehingga akun tidak dapat login lagi. ID, nama akun, data pengajuan, surat, dan riwayat tetap tersimpan. Akun hilang dari daftar Officer aktif; emailnya tetap tercatat dan tidak dapat digunakan untuk membuat akun pengganti. Pengajuan perubahan nama dan penghapusan pada akun yang sama tidak dapat menunggu bersamaan. Penolakan BOH wajib disertai catatan dan mempertahankan akun.
+
+IT memiliki akses pengelolaan akun Officer dan kata sandi sendiri. Role ini tidak memiliki akses data nasabah, transaksi, surat, laporan PDF, atau antrean email. SOL dan Officer tidak dapat mengajukan atau memutuskan pengelolaan akun. BOH memutuskan pengajuan akun baru, perubahan nama, dan penghapusan dari IT; BOH tidak membuat akun langsung. Startup menambahkan status aktif pada akun lama tanpa mengganti ID, nama, maupun kata sandi.
 
 Administrator menyiapkan akun IT pertama melalui terminal pada database yang dituju:
 
@@ -135,7 +137,7 @@ Email konfirmasi menyertakan Date, Message-ID, identitas pengirim, Reply-To, ser
 
 ## PDF pelaksanaan setelah persetujuan
 
-Buka detail pengajuan yang telah disetujui nasabah dan SOL, lalu pilih **Unduh PDF pelaksanaan**. Petugas pembuat dan SOL dapat mengunduh; BOH tidak memiliki akses unduhan PDF transaksi. PDF memuat surat konfirmasi pelaksanaan, identitas pembuat, pernyataan serta waktu konfirmasi nasabah, persetujuan SOL, log aktivitas, dan surat terakhir yang disetujui. File asli disertakan sebagai lampiran PDF dan hash SHA-256 dicantumkan. PDF/JPG/PNG didukung. PDF rusak atau dilindungi kata sandi menghasilkan pesan kesalahan, bukan laporan tanpa dokumen asli.
+Buka detail pengajuan yang telah disetujui nasabah dan SOL, lalu pilih **Unduh PDF pelaksanaan**. Semua Officer dan SOL dapat mengunduh; BOH tidak memiliki akses unduhan PDF transaksi. PDF memuat surat konfirmasi pelaksanaan, identitas pembuat, pernyataan serta waktu konfirmasi nasabah, persetujuan SOL, log aktivitas, dan surat terakhir yang disetujui. File asli disertakan sebagai lampiran PDF dan hash SHA-256 dicantumkan. PDF/JPG/PNG didukung. PDF rusak atau dilindungi kata sandi menghasilkan pesan kesalahan, bukan laporan tanpa dokumen asli.
 
 Surat ini merupakan bukti selesainya alur persetujuan, bukan bukti eksekusi transaksi atau tanda tangan digital tersertifikasi. Tidak ada penanda versi yang ditampilkan; snapshot revisi tetap disimpan secara internal.
 

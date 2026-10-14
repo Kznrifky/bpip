@@ -252,7 +252,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(boh.call(route)[0],403)
         app.create_user('other@example.test','Other Maker','petugas','OtherMaker!2026')
         other=Client(self.url);other.call('/login',{'email':'other@example.test','password':'OtherMaker!2026'})
-        self.assertEqual(other.call(route)[0],403)
+        self.assertEqual(other.call(route)[0],200)
         self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})[0],409)
         self.assertEqual(self.sol.call(route)[0],200)
 
@@ -555,9 +555,10 @@ class WorkflowTests(unittest.TestCase):
         other=Client(self.url)
         status,res,_=other.call('/login',{'email':'other@example.com','password':'OtherSecret!2026'})
         other.csrf=res['csrf']
-        self.assertEqual(other.call('/documents/'+doc_id)[0],403)
-        self.assertEqual(other.call('/documents/'+doc_id+'/file')[0],403)
-        self.assertEqual(other.call('/documents')[1]['documents'],[])
+        self.assertEqual(other.call('/documents/'+doc_id)[0],200)
+        self.assertEqual(other.call('/documents/'+doc_id+'/file')[0],200)
+        self.assertEqual(other.call('/documents')[1]['documents'][0]['id'],doc_id)
+        self.assertEqual(other.call('/documents/'+doc_id+'/cancel',{'version':1,'notes':'Tidak berwenang'})[0],403)
     def test_only_sol_can_add_customer_and_maker_can_use_it(self):
         customer={'cif':'888','name':'PT Baru','account':'000123456789012','person':'Ani','email':'ani@example.com','phone':'081234567890'}
         self.assertEqual(self.maker.call('/customers',customer)[0],403)

@@ -794,7 +794,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .portal-cards .detail-data-row { grid-template-columns: minmax(145px, 43%) minmax(0, 1fr); gap: 12px; }
 .portal-cards .detail-data-row dd { padding-left: 0; }
 .portal-description { margin: 0; padding: 0 22px 20px; }
-.portal-description .detail-data-row { grid-template-columns: minmax(145px, 21%) minmax(0, 1fr); }
+.portal-description .detail-data-row { min-height: 76px; grid-template-columns: minmax(145px, calc(21.5% - 10.75px)) minmax(0, 1fr); }
 .portal-cards .detail-file-row .actions { display: flex; flex-wrap: nowrap; gap: 10px; }
 .portal-cards .detail-file-row .actions .btn { width: auto; min-width: 94px; }
 .customer-portal .btn.primary { background: #0756bd; border-color: #0756bd; color: white; }
@@ -871,8 +871,15 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .account-table td strong { display: block; }
 .account-table td small { display: block; margin-top: 5px; color: #657895; overflow-wrap: anywhere; }
 .account-table .btn { white-space: nowrap; color: #0756bd; }
-.account-table .account-actions { width: 124px; text-align: center; }
+.account-table .account-actions { width: 190px; text-align: center; }
 .account-table .account-actions .btn { min-width: 88px; gap: 7px; }
+.account-requests-table .account-actions { width: 124px; }
+.account-requests-table td:first-child { min-width: 230px; }
+.account-requests-table td:nth-child(4) { white-space: nowrap; }
+.account-user-actions { justify-content: center; gap: 8px; flex-wrap: nowrap; }
+.account-table .account-delete-action { color: #b42318; border-color: #f0d6d6; background: #fff7f7; }
+.account-table .account-delete-action:hover { background: #ffeded; }
+.detail-maker { margin-top: 6px; font-size: 14px; }
 .account-help { color: #657895; font-size: 14px; line-height: 1.6; }
 .account-request-details { margin: 0; display: grid; gap: 14px; }
 .account-request-details > div { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 16px; }
@@ -888,5 +895,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
  .account-card > .card-head select { width: 100%; }
  .account-table.record-table td { padding: 0; }
  .account-table.record-table .account-actions { width: auto; }
+ .account-requests-table td:first-child { min-width: 0; }
+ .account-requests-table td:nth-child(4) { white-space: normal; }
  .account-request-details > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }

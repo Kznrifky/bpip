@@ -51,13 +51,20 @@ MAX_BODY = 8 * 1024 * 1024
 SESSION_TTL = 8 * 3600
 DEMO = False
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, role TEXT, password TEXT);
+CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, role TEXT, password TEXT, active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS officer_account_requests(
  id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, password_hash TEXT,
  requested_by TEXT NOT NULL, requested_name TEXT NOT NULL, created TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'pending', reviewed_by TEXT, reviewed_name TEXT NOT NULL DEFAULT '',
  review_notes TEXT NOT NULL DEFAULT '', reviewed_at TEXT, user_id TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS officer_account_pending_email ON officer_account_requests(email COLLATE NOCASE) WHERE status='pending';
+CREATE TABLE IF NOT EXISTS officer_change_requests(
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL, old_name TEXT NOT NULL, new_name TEXT NOT NULL,
+ kind TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+ requested_by TEXT NOT NULL, requested_name TEXT NOT NULL, created TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'pending', reviewed_by TEXT, reviewed_name TEXT NOT NULL DEFAULT '',
+ review_notes TEXT NOT NULL DEFAULT '', reviewed_at TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS officer_change_pending_user ON officer_change_requests(user_id) WHERE status='pending';
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT, csrf TEXT, expires REAL);
 CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT, email TEXT, at REAL);
 CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
@@ -125,6 +132,8 @@ def initialize():
     with database() as db:
         db.executescript(SCHEMA)
         db.execute('BEGIN IMMEDIATE')
+        if 'active' not in {row['name'] for row in db.execute('PRAGMA table_info(users)')}:
+            db.execute('ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1')
         if 'phone' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
             db.execute("ALTER TABLE customers ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
         if 'revision' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
@@ -142,7 +151,7 @@ def create_user(email, name, role, password):
     email = valid_email(email)
     name = text_field({'name': name}, 'name')
     with database(True) as db:
-        db.execute('INSERT INTO users VALUES(?,?,?,?,?)', (secrets.token_hex(12), email, name, role, password_hash(password)))
+        db.execute('INSERT INTO users(id,email,name,role,password) VALUES(?,?,?,?,?)', (secrets.token_hex(12), email, name, role, password_hash(password)))
 
 def bootstrap_users():
     """Create both initial users atomically, only on an empty persistent DB.
@@ -163,7 +172,7 @@ def bootstrap_users():
             require(not PRODUCTION or password not in ('PetugasDemo!2026', 'SolDemo!2026'), 'Password demo tidak boleh dipakai saat production.')
             values.append((secrets.token_hex(12), email, name, role, password_hash(password)))
         require(values[0][1] != values[1][1], 'Email petugas dan SOL harus berbeda.')
-        db.executemany('INSERT INTO users VALUES(?,?,?,?,?)', values)
+        db.executemany('INSERT INTO users(id,email,name,role,password) VALUES(?,?,?,?,?)', values)
     return True
 
 def verify_action_password(db, user, data):
@@ -180,7 +189,10 @@ def management_audit(db, entity, action, user):
 
 def officer_account_payload(row):
     """Approval history never exposes a credential or password hash."""
-    return {key: row[key] for key in ('id', 'email', 'name', 'requested_by', 'requested_name', 'created', 'status', 'reviewed_by', 'reviewed_name', 'review_notes', 'reviewed_at', 'user_id')}
+    return {key: row[key] for key in ('id', 'email', 'name', 'requested_by', 'requested_name', 'created', 'status', 'reviewed_by', 'reviewed_name', 'review_notes', 'reviewed_at', 'user_id')} | {'type': 'create'}
+
+def officer_change_payload(row):
+    return {key: row[key] for key in ('id', 'email', 'old_name', 'reason', 'requested_by', 'requested_name', 'created', 'status', 'reviewed_by', 'reviewed_name', 'review_notes', 'reviewed_at', 'user_id')} | {'type': row['kind'], 'name': row['new_name']}
 
 class AppError(Exception):
     def __init__(self, status, message):
@@ -350,10 +362,10 @@ def document_summary(db, row):
     doc['resend_available_at'] = resend_available_at(db, doc)
     return doc
 
-def owned_document(db, doc_id, user):
+def owned_document(db, doc_id, user, shared_read=False):
     doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
     require(doc is not None, 'Pengajuan tidak ditemukan.', 404)
-    require(user['role'] == 'sol' or doc['maker'] == user['id'], 'Anda tidak memiliki akses ke pengajuan ini.', 403)
+    require(user['role'] == 'sol' or doc['maker'] == user['id'] or (shared_read and user['role'] == 'petugas'), 'Anda tidak memiliki akses ke pengajuan ini.', 403)
     require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc_id,)).fetchone(), 'Pengajuan telah dihapus dari daftar. SOL dapat memulihkannya.', 404)
     return doc
 
@@ -504,7 +516,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
         raw = cookie.get('bpip_session')
-        row = db.execute('SELECT u.*,s.csrf,s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>?', (digest(raw.value) if raw else '', time.time())).fetchone()
+        row = db.execute('SELECT u.*,s.csrf,s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>? AND u.active=1', (digest(raw.value) if raw else '', time.time())).fetchone()
         require(row is not None, 'Sesi berakhir. Silakan masuk kembali.', 401)
         if mutate:
             require(hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), row['csrf']), 'Token sesi tidak sesuai. Muat ulang halaman.', 403)
@@ -541,8 +553,12 @@ class Handler(BaseHTTPRequestHandler):
                 if path in ('/api/officer-account-requests', '/api/officers'):
                     require(user['role'] in ('it', 'boh'), 'Hanya IT dan BOH yang dapat mengakses pengelolaan akun Officer.', 403)
                     if path == '/api/officers':
-                        return self.respond({'officers': [self.user_payload(row) for row in db.execute("SELECT id,email,name,role FROM users WHERE role='petugas' ORDER BY name,email")]})
-                    return self.respond({'requests': [officer_account_payload(row) for row in db.execute("SELECT * FROM officer_account_requests ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, created DESC, id DESC")]})
+                        return self.respond({'officers': [self.user_payload(row) for row in db.execute("SELECT id,email,name,role FROM users WHERE role='petugas' AND active=1 ORDER BY name,email")]})
+                    requests = [officer_account_payload(row) for row in db.execute('SELECT * FROM officer_account_requests')]
+                    requests += [officer_change_payload(row) for row in db.execute('SELECT * FROM officer_change_requests')]
+                    requests.sort(key=lambda row: (row['created'], row['id']), reverse=True)
+                    requests.sort(key=lambda row: row['status'] != 'pending')
+                    return self.respond({'requests': requests})
                 require(user['role'] != 'it', 'IT hanya dapat mengelola akun Officer.', 403)
                 require(user['role'] != 'boh' or path in ('/api/documents', '/api/customer-edit-requests'), 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah serta akun Officer.', 403)
                 if path == '/api/customer-edit-requests':
@@ -552,10 +568,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers WHERE NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif) ORDER BY name')], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0] if user['role']=='sol' else 0})
                 if path == '/api/documents':
                     visible = 'NOT EXISTS (SELECT 1 FROM archived_documents a WHERE a.doc_id=documents.id)'
-                    rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC') if user['role'] in ('sol','boh') else db.execute('SELECT * FROM documents WHERE '+visible+' AND maker=? ORDER BY updated DESC', (user['id'],))
+                    rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC')
                     summaries = [document_summary(db, r) for r in rows]
                     if user['role']=='boh':
-                        summaries = [{k:d[k] for k in ('id','cif','customer_name','kind','nominal','version','customer_status','sol_status','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None} for d in summaries]
+                        summaries = [{k:d[k] for k in ('id','cif','customer_name','maker_name','kind','nominal','version','customer_status','sol_status','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None} for d in summaries]
                     return self.respond({'documents': summaries, 'archived_count': db.execute('SELECT COUNT(*) FROM archived_documents').fetchone()[0] if user['role']=='sol' else 0})
                 if path in ('/api/customers/archived','/api/documents/archived'):
                     require(user['role']=='sol', 'Hanya SOL yang dapat mengelola arsip.', 403)
@@ -566,7 +582,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond({'items':[dict(r) for r in rows]})
                 report = re.fullmatch(r'/api/documents/([^/]+)/execution-pdf', path)
                 if report:
-                    doc = owned_document(db, report[1], user)
+                    doc = owned_document(db, report[1], user, shared_read=True)
                     require(doc['sol_status']=='approved' and doc['customer_status']=='confirmed', 'PDF tersedia setelah nasabah dan SOL menyetujui pengajuan.', 409)
                     version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'],doc['version'])).fetchone()
                     audit = [dict(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id', (doc['id'],))]
@@ -590,13 +606,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(whatsapp_preview(db, doc))
                 historic = re.fullmatch(r'/api/documents/([^/]+)/versions/([0-9]+)/file', path)
                 if historic:
-                    doc = owned_document(db, historic[1], user)
+                    doc = owned_document(db, historic[1], user, shared_read=True)
                     version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], int(historic[2]))).fetchone()
                     require(version is not None, 'Versi surat tidak ditemukan.', 404)
                     return self.send_file(version)
                 match = re.fullmatch(r'/api/documents/([^/]+)(/file)?', path)
                 if match:
-                    doc = owned_document(db, match[1], user)
+                    doc = owned_document(db, match[1], user, shared_read=True)
                     if match[2]:
                         version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
                         return self.send_file(version)
@@ -652,7 +668,7 @@ class Handler(BaseHTTPRequestHandler):
                 user = db.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
                 dummy = '0' * 32 + ':' + '0' * 64
                 ok = password_matches(password, user['password'] if user else dummy)
-                if not user or not ok:
+                if not user or not ok or not user['active']:
                     db.execute('INSERT INTO login_attempts VALUES(?,?,?)', (ip, email, time.time()))
                     db.commit()
                     raise AppError(401, 'Email atau password tidak sesuai.')
@@ -729,15 +745,42 @@ class Handler(BaseHTTPRequestHandler):
                 management_audit(db, 'officer-accounts/' + request['id'], 'BOH ' + ('menyetujui' if decision == 'approved' else 'menolak') + ' akun Officer: ' + request['email'], user)
                 db.commit()
                 return self.respond({'ok': True, 'user_id': user_id})
-            officer_name = re.fullmatch(r'/api/officers/([0-9a-f]{24})/name', path)
-            if officer_name:
-                require(user['role'] == 'it', 'Hanya IT yang dapat mengganti nama Officer.', 403)
-                officer = db.execute("SELECT * FROM users WHERE id=? AND role='petugas'", (officer_name[1],)).fetchone()
+            officer_change = re.fullmatch(r'/api/officers/([0-9a-f]{24})/(name|delete-requests)', path)
+            if officer_change:
+                require(user['role'] == 'it', 'Hanya IT yang dapat mengajukan perubahan akun Officer.', 403)
+                officer = db.execute("SELECT * FROM users WHERE id=? AND role='petugas' AND active=1", (officer_change[1],)).fetchone()
                 require(officer is not None, 'Akun Officer tidak ditemukan.', 404)
-                require(set(data) <= {'name'}, 'Hanya nama Officer yang dapat diubah.')
-                name = text_field(data, 'name')
-                db.execute('UPDATE users SET name=? WHERE id=?', (name, officer['id']))
-                management_audit(db, 'users/' + officer['id'], 'IT mengganti nama Officer: ' + json.dumps({'before': officer['name'], 'after': name}, ensure_ascii=False), user)
+                deleting = officer_change[2] == 'delete-requests'
+                require(set(data) <= ({'reason'} if deleting else {'name'}), 'Data pengajuan akun tidak valid.')
+                name = officer['name'] if deleting else text_field(data, 'name')
+                reason = text_field(data, 'reason', 1500) if deleting else ''
+                require(deleting or name != officer['name'], 'Nama baru masih sama dengan nama saat ini.')
+                require(not db.execute("SELECT 1 FROM officer_change_requests WHERE user_id=? AND status='pending'", (officer['id'],)).fetchone(), 'Perubahan akun Officer ini sedang menunggu persetujuan BOH.', 409)
+                request_id = secrets.token_hex(12)
+                db.execute('INSERT INTO officer_change_requests(id,user_id,email,old_name,new_name,kind,reason,requested_by,requested_name,created) VALUES(?,?,?,?,?,?,?,?,?,?)', (request_id, officer['id'], officer['email'], officer['name'], name, 'delete' if deleting else 'rename', reason, user['id'], user['name'], now()))
+                management_audit(db, 'users/' + officer['id'], 'IT mengajukan ' + ('penghapusan akun' if deleting else 'perubahan nama') + ' Officer: ' + request_id, user)
+                db.commit()
+                return self.respond({'id': request_id}, 201)
+            change_review = re.fullmatch(r'/api/officer-change-requests/([0-9a-f]{24})/review', path)
+            if change_review:
+                require(user['role'] == 'boh', 'Hanya BOH yang dapat memutuskan perubahan akun Officer.', 403)
+                request = db.execute('SELECT * FROM officer_change_requests WHERE id=?', (change_review[1],)).fetchone()
+                require(request is not None, 'Pengajuan perubahan akun tidak ditemukan.', 404)
+                require(request['status'] == 'pending', 'Pengajuan perubahan akun ini sudah diputuskan.', 409)
+                decision = data.get('decision')
+                require(decision in ('approved', 'rejected'), 'Keputusan tidak valid.')
+                notes = text_field(data, 'notes', 1500, decision == 'rejected')
+                if decision == 'approved':
+                    officer = db.execute("SELECT * FROM users WHERE id=? AND role='petugas' AND active=1", (request['user_id'],)).fetchone()
+                    require(officer is not None, 'Akun Officer tidak ditemukan.', 409)
+                    require(officer['name'] == request['old_name'] and officer['email'] == request['email'], 'Data akun sudah berubah. Tolak pengajuan ini dan minta IT mengajukan kembali.', 409)
+                    if request['kind'] == 'delete':
+                        db.execute('UPDATE users SET active=0 WHERE id=?', (officer['id'],))
+                        db.execute('DELETE FROM sessions WHERE user_id=?', (officer['id'],))
+                    else:
+                        db.execute('UPDATE users SET name=? WHERE id=?', (request['new_name'], officer['id']))
+                db.execute('UPDATE officer_change_requests SET status=?,reviewed_by=?,reviewed_name=?,review_notes=?,reviewed_at=? WHERE id=?', (decision, user['id'], user['name'], notes, now(), request['id']))
+                management_audit(db, 'users/' + request['user_id'], 'BOH ' + ('menyetujui' if decision == 'approved' else 'menolak') + (' penghapusan akun' if request['kind'] == 'delete' else ' perubahan nama') + ' Officer: ' + json.dumps({'request': request['id'], 'before': request['old_name'], 'after': request['new_name']}, ensure_ascii=False), user)
                 db.commit()
                 return self.respond({'ok': True})
             require(user['role'] != 'it', 'IT hanya dapat mengelola akun Officer.', 403)
