@@ -790,6 +790,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .portal-cards .detail-summary-grid { grid-template-columns: .85fr 1.1fr 1fr; padding-bottom: 0; }
 .portal-cards .detail-summary-grid dd { font-size: 16px; }
 .portal-cards .detail-paired-data { padding-bottom: 8px; }
+.portal-cards .detail-paired-data .detail-data-row { min-height: 76px; }
 .portal-cards .detail-data-row { grid-template-columns: minmax(145px, 43%) minmax(0, 1fr); gap: 12px; }
 .portal-cards .detail-data-row dd { padding-left: 0; }
 .portal-description { margin: 0; padding: 0 22px 20px; }
