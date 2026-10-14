@@ -77,6 +77,22 @@ Perintah `init` meminta email, nama dan password untuk petugas dan SOL. Password
 
 Password dapat diganti di menu Pengaturan. Sesi lain dicabut setelah perubahan password.
 
+### Role IT dan persetujuan akun Officer
+
+IT membuka **Kelola Akun → Ajukan akun Officer**, mengisi nama, email, serta kata sandi awal minimal 12 karakter. Akun belum dapat login selama statusnya **Menunggu BOH**. BOH membuka **Persetujuan Akun → Periksa** dan memilih **Setujui akun** atau **Tolak** dengan alasan. Persetujuan membuat akun dengan role Officer; penolakan tidak membuat akun. Keputusan hanya dapat diberikan sekali dan email yang sedang menunggu tidak dapat diajukan dua kali.
+
+IT dapat memilih **Ubah nama** pada daftar **Akun Officer Aktif**. Perubahan mempertahankan email, kata sandi, role, ID akun, dan kepemilikan pengajuan. Nama baru muncul pada sesi Officer saat data diperbarui. Pembuatan, keputusan BOH, serta perubahan nama dicatat dalam audit pengelolaan. API pengelolaan tidak mengembalikan kata sandi atau hash; hash sementara hanya disimpan sampai pengajuan diputuskan.
+
+IT memiliki akses pengelolaan akun Officer dan kata sandi sendiri. Role ini tidak memiliki akses data nasabah, transaksi, surat, laporan PDF, atau antrean email. SOL dan Officer tidak dapat mengajukan, menyetujui, maupun mengganti nama akun. BOH tidak dapat membuat akun langsung atau mengganti nama Officer.
+
+Administrator menyiapkan akun IT pertama melalui terminal pada database yang dituju:
+
+```sh
+python3 server.py create-user --role it
+```
+
+Perintah meminta email, nama, dan kata sandi yang tidak ditampilkan saat diketik. Akun BOH awal juga dapat disiapkan dengan `--role boh`. Perintah ini tidak mengubah akun yang sudah ada; jangan menjalankannya tanpa memastikan database yang dituju. Fitur tidak membuat akun IT atau BOH produksi secara otomatis saat startup.
+
 ## Hosting dan batas operasional
 
 Hasil ini merupakan aplikasi MVP yang berjalan lokal dengan backend lengkap untuk alur di atas. Server menggunakan `http.server` Python; **jangan mengekspos port server secara langsung sebagai layanan produksi perbankan**. Sebelum penggunaan operasional, gunakan ingress/reverse proxy HTTPS dengan pembatasan ukuran body (8 MB), rate limit, timeout dan akses terkontrol; gunakan entrypoint Gunicorn yang tersedia di `wsgi.py` dan ikuti `DEPLOY.md`. Review keamanan aplikasi tetap diperlukan sesuai standar institusi. Data CIF saat ini dikelola di aplikasi, belum terintegrasi dengan core banking.
