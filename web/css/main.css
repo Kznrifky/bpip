@@ -940,6 +940,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .dual-customer-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 20px; }
 .dual-customer-overview > :first-child { grid-column: 1 / -1; grid-template-columns: minmax(145px, calc(21.5% - 6px)) minmax(0, 1fr); }
 .dual-detail-verifiers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.dual-detail-verifiers.single-detail-verifiers { grid-template-columns: minmax(0, 1fr); }
 .dual-detail-verifier { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
 .dual-detail-verifier h3 { margin: 0 0 14px; color: #122d56; font-size: 16px; }
 .dual-detail-verifier dl { display: grid; gap: 8px; margin: 0; }
@@ -959,3 +960,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .customer-directory-table tr[data-customer-detail] { cursor: pointer; }
 .customer-directory-table tr[data-customer-detail]:hover { background: #f5f9ff; }
 .customer-directory-table tr[data-customer-detail]:focus-visible { outline: 2px solid #0756bd; outline-offset: -3px; }
+
+/* Customer decision result: bright approval and rejection symbols. */
+.customer-portal .portal-result-symbol.confirmed { background: #22c55e; color: #fff; }
+.customer-portal .portal-result-symbol.rejected { background: #ff3b30; color: #fff; }

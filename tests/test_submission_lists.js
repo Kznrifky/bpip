@@ -208,16 +208,20 @@ test('Customer row click and keyboard open details without intercepting controls
   assert.equal(route,'customer/123');assert.ok(prevented);
 });
 
-test('Customer detail keeps the original six fields for one and uses two verifier boxes for two', () => {
+test('Customer detail uses the same grouped style with one or two verifier boxes', () => {
   const main={innerHTML:''};context.$=()=>main;
   context.icon=symbol=>`<svg>${symbol}</svg>`;
   context.state.customers=[{cif:'123',name:'PT Satu',account:'000123456789012',person:'Direktur',email:'satu@example.test',phone:'081234567890',verification_count:1},{cif:'456',name:'PT Dua',account:'000987654321012',person:'Direktur',email:'dua@example.test',phone:'081234567890',verification_count:2,verifier_name:'Adi',second_name:'Maya',second_person:'Komisaris',second_email:'maya@example.test',second_phone:'082234567890'}];
   context.renderCustomerDetail('123');
-  for(const label of ['Nama nasabah','Jabatan','Nomor rekening','CIF','Email','No HP'])assert.ok(main.innerHTML.includes('<span>'+label+'</span>'));
-  assert.ok(!main.innerHTML.includes('dual-detail-verifier'));
+  for(const label of ['Nama nasabah','Nomor rekening','CIF','Nama Verifikator','Jabatan Verifikator','Email Verifikator','Nomor HP'])assert.ok(main.innerHTML.includes('<span>'+label+'</span>'));
+  assert.ok(main.innerHTML.includes('single-detail-verifiers'));
+  assert.ok(main.innerHTML.includes('aria-label="Verifikator 1"'));
+  assert.ok(!main.innerHTML.includes('aria-label="Verifikator 2"'));
+  assert.ok(main.innerHTML.includes('Belum tercatat'));
   context.renderCustomerDetail('456');
   assert.ok(main.innerHTML.includes('aria-label="Verifikator 1"'));
   assert.ok(main.innerHTML.includes('aria-label="Verifikator 2"'));
+  assert.ok(!main.innerHTML.includes('single-detail-verifiers'));
   assert.ok(main.innerHTML.includes('082234567890'));
   assert.ok(main.innerHTML.includes('data-route="customers"'));
 });
