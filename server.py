@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 from email.policy import SMTP
-from email.utils import formataddr, formatdate, parseaddr
+from email.utils import formataddr, formatdate, make_msgid, parseaddr
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -481,11 +481,17 @@ def build_confirmation_email(row):
     message['Auto-Submitted'] = 'auto-generated'
     message.set_content(row['body'])
     logo = ROOT / 'web/assets/bri-vista-login-logo.png'
-    logo_cid = 'bri-vista-logo' if logo.is_file() else None
+    cid_domain = sender.rsplit('@', 1)[-1]
+    logo_cid = make_msgid(idstring='bri-vista-logo', domain=cid_domain)[1:-1] if logo.is_file() else None
     email_html = render_confirmation_html(row['body'], BASE_URL, logo_cid)
     message.add_alternative(email_html, subtype='html')
     if logo_cid:
-        message.get_payload()[-1].add_related(logo.read_bytes(), maintype='image', subtype='png', cid=f'<{logo_cid}>', filename='bri-vista.png', disposition='inline')
+        related = message.get_payload()[-1]
+        html_cid = make_msgid(idstring='bri-vista-html', domain=cid_domain)
+        related['Content-ID'] = html_cid
+        related.add_related(logo.read_bytes(), maintype='image', subtype='png', cid=f'<{logo_cid}>', disposition='inline')
+        related.set_param('type', 'text/html')
+        related.set_param('start', html_cid)
     return message, sender
 
 def deliver_one():

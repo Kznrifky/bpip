@@ -964,3 +964,8 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 /* Customer decision result: bright approval and rejection symbols. */
 .customer-portal .portal-result-symbol.confirmed { background: #22c55e; color: #fff; }
 .customer-portal .portal-result-symbol.rejected { background: #ff3b30; color: #fff; }
+
+/* Keep the date filter clear of short table cards and inside the viewport. */
+@media (min-width: 761px) {
+ .date-range-panel { position: fixed; right: auto; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+}

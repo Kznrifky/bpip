@@ -1,6 +1,7 @@
 """Integration checks against an actual HTTP server and temporary SQLite DB."""
 import base64
 from io import BytesIO
+from email.parser import BytesParser
 import concurrent.futures
 import http.cookiejar
 import importlib.util
@@ -888,13 +889,18 @@ class WorkflowTests(unittest.TestCase):
         row['body']='Yth. <script>alert(1)</script>,\n\n'+app.BASE_URL+'/#confirm/test_token\n\nJangan bagikan tautan ini.'
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':'sender@gmail.com','SMTP_FROM':'BPIP <other@example.com>'}):
             message,sender=app.build_confirmation_email(row)
+            second_message,_=app.build_confirmation_email(row)
+        first_logo=next(part for part in message.walk() if part.get_content_type()=='image/png')
+        second_logo=next(part for part in second_message.walk() if part.get_content_type()=='image/png')
+        self.assertNotEqual(first_logo['Content-ID'],second_logo['Content-ID'])
+        message=BytesParser(policy=app.SMTP).parsebytes(message.as_bytes())
         self.assertEqual(sender,'sender@gmail.com')
         self.assertEqual(app.parseaddr(message['From'])[1],sender)
         self.assertEqual(app.parseaddr(message['Reply-To'])[1],sender)
         self.assertIsNotNone(message['Date'])
         self.assertEqual(message['Message-ID'],f"<{row['id']}@gmail.com>")
         self.assertEqual(message.get_content_type(),'multipart/alternative')
-        self.assertEqual(message.get_body(preferencelist=('plain',)).get_content(),row['body']+'\n')
+        self.assertEqual(message.get_body(preferencelist=('plain',)).get_content().replace('\r\n','\n'),row['body']+'\n')
         html_body=message.get_body(preferencelist=('html',)).get_content()
         self.assertIn('href="'+app.BASE_URL+'/#confirm/test_token"',html_body)
         self.assertNotIn('<script>',html_body)
@@ -902,10 +908,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('DKIM-Signature',message)
         self.assertIn('BRI VISTA',html_body)
         self.assertIn('Verification, Integration &amp; Secure Tracking Application',html_body)
-        self.assertIn('src="cid:bri-vista-logo"',html_body)
-        inline_logo=next(part for part in message.walk() if part.get('Content-ID')=='<bri-vista-logo>')
+        inline_logo=next(part for part in message.walk() if part.get_content_type()=='image/png')
+        logo_cid=inline_logo['Content-ID']
+        self.assertRegex(logo_cid,r'^<[^<>\s]+\.bri-vista-logo@gmail\.com>$')
+        self.assertIn('src="cid:'+logo_cid[1:-1]+'"',html_body)
+        related=next(part for part in message.walk() if part.get_content_type()=='multipart/related')
+        self.assertEqual(related.get_param('type'),'text/html')
+        self.assertEqual(related.get_param('start'),related.get_payload()[0]['Content-ID'])
+        self.assertEqual(related.get_payload()[0].get_content_type(),'text/html')
         self.assertEqual(inline_logo.get_content_type(),'image/png')
         self.assertEqual(inline_logo.get_content_disposition(),'inline')
+        self.assertIsNone(inline_logo.get_filename())
         self.assertTrue(inline_logo.get_payload(decode=True).startswith(b'\x89PNG\r\n\x1a\n'))
         self.assertNotIn('(v1)',row['subject'])
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':''}):

@@ -62,6 +62,18 @@ function matchesSubmissionDate(d) {const day=submissionDate(d.created);return (!
 const rangeDay = day => new Date(day+'T12:00:00');
 const rangeDateLabel = day => new Intl.DateTimeFormat('id-ID',{day:'numeric',month:'short',year:'numeric'}).format(rangeDay(day));
 const rangeButtonLabel = () => state.dateFrom&&state.dateTo ? `${rangeDateLabel(state.dateFrom)} – ${rangeDateLabel(state.dateTo)}` : 'Filter tanggal';
+function positionDateRange() {
+ const picker=$('#date-picker'),trigger=$('#date-range-trigger'),panel=$('#date-range-panel');
+ if(!picker?.open||!trigger||!panel)return;
+ if(window.matchMedia('(max-width: 760px)').matches){panel.style.removeProperty('left');panel.style.removeProperty('top');return;}
+ const rect=trigger.getBoundingClientRect(),width=panel.offsetWidth,height=panel.offsetHeight,margin=12,gap=8;
+ const left=Math.max(margin,Math.min(rect.right-width,window.innerWidth-width-margin));
+ const below=rect.bottom+gap;
+ const top=below+height<=window.innerHeight-margin?below:Math.max(margin,rect.top-height-gap);
+ panel.style.left=left+'px';panel.style.top=top+'px';
+}
+window.addEventListener('resize',positionDateRange);
+window.addEventListener('scroll',positionDateRange,true);
 function bindDateRange() {
  const picker=$('#date-picker'),trigger=$('#date-range-trigger'),panel=$('#date-range-panel');
  let from=state.dateFrom,to=state.dateTo,month=rangeDay(from||submissionDate(new Date()));month.setDate(1);
@@ -71,6 +83,7 @@ function bindDateRange() {
  const draw=()=>{
   const offset=(month.getDay()+6)%7,days=new Date(month.getFullYear(),month.getMonth()+1,0).getDate();
   panel.innerHTML=`<div class="range-month"><button type="button" class="btn icon small" data-month="-1" aria-label="Bulan sebelumnya">${icon('left')}</button><strong>${esc(new Intl.DateTimeFormat('id-ID',{month:'long',year:'numeric'}).format(month))}</strong><button type="button" class="btn icon small" data-month="1" aria-label="Bulan berikutnya">${icon('arrow')}</button></div><div class="range-calendar">${['Sen','Sel','Rab','Kam','Jum','Sab','Min'].map(x=>`<span class="range-weekday">${x}</span>`).join('')}${'<span></span>'.repeat(offset)}${Array.from({length:days},(_,i)=>{const key=dayKey(new Date(month.getFullYear(),month.getMonth(),i+1)),edge=key===from||key===to,inside=from&&to&&key>from&&key<to;return `<button type="button" class="range-day ${edge?'selected':inside?'in-range':''}" data-day="${key}" aria-label="${esc(rangeDateLabel(key))}" aria-pressed="${edge?'true':'false'}">${i+1}</button>`;}).join('')}</div><p class="range-hint" aria-live="polite">${from&&to?esc(`${rangeDateLabel(from)} – ${rangeDateLabel(to)}`):from?'Pilih tanggal akhir.':'Pilih tanggal awal, lalu tanggal akhir.'}</p><div class="range-footer"><button type="button" class="btn text small" data-range-reset ${from||to||state.dateFrom||state.dateTo?'':'disabled'}>Reset</button><button type="button" class="btn small" data-range-close>Batal</button><button type="button" class="btn primary small" data-range-apply ${from&&to?'':'disabled'}>Terapkan</button></div>`;
+  positionDateRange();
  };
  picker.addEventListener('toggle',()=>{if(picker.open){const today=submissionDate(new Date());from=state.dateFrom||today;to=state.dateTo||(state.dateFrom?'':today);month=rangeDay(from);month.setDate(1);draw();}});
  panel.addEventListener('click',e=>{
@@ -379,8 +392,10 @@ function showWhatsAppPreview(preview) {
  dialog.innerHTML=`<div class="whatsapp-preview"><div class="dialog-head"><h2 id="dialog-title">Kirim WhatsApp</h2><button class="btn text icon" data-action="close-dialog" aria-label="Tutup">${icon('close')}</button></div><div class="dialog-body stack"><div class="field"><label for="whatsapp-phone">Nomor WhatsApp</label><input id="whatsapp-phone" value="+${esc(preview.phone)}" readonly></div><div class="field"><label for="whatsapp-message">Pratinjau pesan</label><textarea id="whatsapp-message" class="whatsapp-message" rows="14" readonly>${esc(preview.message)}</textarea></div><p class="muted">Pesan belum dikirim. Tekan Kirim setelah WhatsApp terbuka.</p></div><div class="dialog-footer"><button class="btn" data-action="copy-whatsapp-message">${icon('copy')} Salin pesan</button><a class="btn primary" href="${esc(preview.url)}" target="_blank" rel="noopener noreferrer">${icon('chat')} Buka WhatsApp</a></div></div>`;
  dialog.showModal();
 }
-function renderDualCustomerData(d,field,legacyPhone) {
- return `<div class="dual-customer-data"><dl class="dual-customer-overview">${field('Nama nasabah',d.customer_name,'person')}${field('CIF',d.cif,'identity')}${field('Nomor rekening',d.account,'payment')}</dl><div class="dual-detail-verifiers${d.verification.verifiers.length===1?' single-detail-verifiers':''}">${d.verification.verifiers.map(v=>`<section class="dual-detail-verifier" aria-label="Verifikator ${v.position}"><h3>Verifikator ${v.position}</h3><dl>${field('Nama Verifikator',v.name,'person')}${field('Jabatan Verifikator',v.person,'briefcase')}${field('Nomor HP',v.phone||(v.position===1?legacyPhone:''),'phone')}${field('Email Verifikator',v.email,'mail')}</dl></section>`).join('')}</div></div>`;
+function renderDualCustomerData(d,field,legacyPhone,singleTitle='Verifikator 1') {
+ const verifiers=d.verification?.verifiers?.length?d.verification.verifiers:[{position:1,name:d.verifier_name,person:d.person,phone:legacyPhone,email:d.email}];
+ const title=v=>verifiers.length===1?singleTitle:'Verifikator '+v.position;
+ return `<div class="dual-customer-data"><dl class="dual-customer-overview">${field('Nama nasabah',d.customer_name,'person')}${field('CIF',d.cif,'identity')}${field('Nomor rekening',d.account,'payment')}</dl><div class="dual-detail-verifiers${verifiers.length===1?' single-detail-verifiers':''}">${verifiers.map(v=>`<section class="dual-detail-verifier" aria-label="${esc(title(v))}"><h3>${esc(title(v))}</h3><dl>${field('Nama Verifikator',v.name,'person')}${field('Jabatan Verifikator',v.person,'briefcase')}${field('Nomor HP',v.phone||(v.position===1?legacyPhone:''),'phone')}${field('Email Verifikator',v.email,'mail')}</dl></section>`).join('')}</div></div>`;
 }
 function renderDetail() {
  const d=state.detail;const sol=state.user.role==='sol';const canDownload=state.user.role!=='boh'&&d.sol_status==='approved'&&d.customer_status==='confirmed';
@@ -395,7 +410,7 @@ function renderDetail() {
  ${renderDocumentProgress(d)}
  <div class="detail-card-stack">
  <section class="card detail-section-card">${cardHead('Informasi Pengajuan','file')}<div class="detail-summary-grid"><div class="detail-summary-cell"><span class="detail-summary-symbol">${icon('file')}</span><dl><dt>Nomor SI</dt><dd class="detail-id-value"><span id="detail-document-id">${esc(d.id)}</span><button class="btn icon small" data-action="copy-document-id" aria-label="Salin nomor SI" title="Salin nomor SI">${icon('copy')}</button></dd></dl></div><div class="detail-summary-cell"><span class="detail-summary-symbol">${icon('calendar')}</span><dl><dt>Dibuat pada</dt><dd>${date(d.created)}</dd></dl></div><div class="detail-summary-cell"><span class="detail-summary-symbol purple">${icon('file')}</span><dl><dt>Jenis dokumen</dt><dd>${esc(d.kind)}</dd></dl></div></div></section>
- <section class="card detail-section-card">${cardHead('Data Nasabah','people')}${d.verification?.required===2?renderDualCustomerData(d,field,customer?.phone||d.phone):`<div class="detail-paired-data"><dl>${field('Nama nasabah',d.customer_name,'person')}${field('Jabatan',d.person,'briefcase')}${field('Nomor rekening',d.account,'payment')}</dl><dl>${field('CIF',d.cif,'identity')}${field('Email',d.email,'mail')}${field('No HP',customer?.phone||d.phone||'Belum diisi','phone')}</dl></div>`}</section>
+ <section class="card detail-section-card">${cardHead('Data Nasabah','people')}${renderDualCustomerData(d,field,customer?.phone||d.phone,'Verifikator')}</section>
  <section class="card detail-section-card detail-transaction-card">${cardHead('Informasi Transaksi','payment','green')}<div class="detail-paired-data"><dl>${field('Nominal transaksi',rupiah(d.nominal),'payment')}${field('Rekening tujuan',d.destination_account,'payment')}</dl><dl>${field('Nama Rekening Tujuan',d.destination_name,'person')}${field('Keterangan',d.description||'—','info')}</dl></div></section>
  <section class="card detail-section-card detail-document-card">${cardHead('Dokumen Transaksi','attachment','purple')}<div class="card-pad"><div class="detail-file-row"><span class="detail-file-icon">${icon('file')}</span><strong>${esc(d.file.filename)}</strong><div class="actions"><button class="btn small" data-action="download-file">${icon('download')} Unduh</button><button class="btn small detail-preview-button" data-action="preview-file">${icon('eye')} Lihat</button></div></div><div id="preview-container"></div></div></section>
  ${sol?`<section class="card detail-section-card detail-decision-card">${cardHead('Verifikasi SOL','shield')}<div class="card-pad">${renderSolDecision(d)}</div></section>`:state.user.role==='petugas'?renderOfficerFollowup(d):''}

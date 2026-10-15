@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/js/app.js'), 'utf8');
 const context = vm.createContext({state: {documents: []}});
-for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail']) {
+for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail', 'positionDateRange']) {
   const start = source.indexOf('function ' + name + '(');
   assert.ok(start >= 0, 'Missing ' + name);
   let cursor = source.indexOf('{', start), depth = 0, end;
@@ -173,6 +173,11 @@ test('Data Nasabah groups both verifier identities with their own phone and emai
   for(const value of ['Adi','Maya','Direktur','Komisaris','081111111111','082222222222','adi@example.test','maya@example.test'])assert.ok(html.includes(value));
   assert.equal((html.match(/Nama Verifikator/g)||[]).length,2);
   assert.ok(!html.includes('Disetujui'));
+  const single=context.renderDualCustomerData({customer_name:'PT Satu',cif:'123',account:'000123456789012',person:'Direktur',email:'satu@example.test',verification:{required:1,verifiers:[]}},(label,value)=>`<div>${label}: ${value||'Belum tercatat'}</div>`,'081234567890','Verifikator');
+  assert.ok(single.includes('single-detail-verifiers'));
+  assert.ok(single.includes('<h3>Verifikator</h3>'));
+  assert.ok(!single.includes('<h3>Verifikator 1</h3>'));
+  for(const value of ['Direktur','satu@example.test','081234567890'])assert.ok(single.includes(value));
 });
 
 
@@ -224,4 +229,20 @@ test('Customer detail uses the same grouped style with one or two verifier boxes
   assert.ok(!main.innerHTML.includes('single-detail-verifiers'));
   assert.ok(main.innerHTML.includes('082234567890'));
   assert.ok(main.innerHTML.includes('data-route="customers"'));
+});
+
+
+test('Date filter stays within the viewport near screen edges and releases desktop coordinates on mobile', () => {
+  let mobile=false;let bounds={top:398,bottom:442,right:1219};
+  const panel={offsetWidth:320,offsetHeight:414,style:{removeProperty(key){delete this[key];}}};
+  const picker={open:true},trigger={getBoundingClientRect:()=>bounds};
+  context.$=selector=>({'#date-picker':picker,'#date-range-trigger':trigger,'#date-range-panel':panel}[selector]);
+  context.window={innerWidth:1280,innerHeight:720,matchMedia:()=>({matches:mobile})};
+  const fits=()=>{const x=parseFloat(panel.style.left),y=parseFloat(panel.style.top);assert.ok(x>=12&&x+panel.offsetWidth<=1268);assert.ok(y>=12&&y+panel.offsetHeight<=708);};
+  context.positionDateRange();fits();
+  bounds={top:30,bottom:74,right:200};context.positionDateRange();fits();
+  assert.ok(parseFloat(panel.style.top)>bounds.bottom);
+  mobile=true;context.positionDateRange();
+  assert.equal(panel.style.left,undefined);assert.equal(panel.style.top,undefined);
+  picker.open=false;context.positionDateRange();assert.equal(panel.style.top,undefined);
 });
