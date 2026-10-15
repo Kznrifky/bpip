@@ -19,7 +19,9 @@ def confirmation_body(doc, link, expires, ttl_hours=24):
     position = doc['person'] if 'person' in doc.keys() else None
     role = ' '.join(str(position or 'Bapak/Ibu').split())
     role = role[:1].upper() + role[1:]
-    return f"""Yth. {role} {values['customer_name']},
+    verifier_name = ' '.join(str(doc.get('verifier_name', '')).split()) if isinstance(doc, dict) else ''
+    greeting = f"Yth. {verifier_name} ({role} {values['customer_name']})," if verifier_name else f"Yth. {role} {values['customer_name']},"
+    return f"""{greeting}
 
 {INTRO}
 

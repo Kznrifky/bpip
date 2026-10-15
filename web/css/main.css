@@ -915,3 +915,47 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 
 /* Return from document detail to the originating list. */
 .detail-title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+/* Optional two-verifier scheme, using the existing card and form styles. */
+#customer-form .verifier-fields { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 18px; }
+#customer-form.dual-verifiers .verifier-fields { padding: 16px; border: 1px solid var(--line); border-radius: 8px; }
+#customer-form .verifier-fields legend { padding: 0 8px; font-weight: 600; }
+#c-second-verifier[hidden], #c-verifier-name-field[hidden] { display: none; }
+
+@media (min-width: 760px) {
+ #dialog:has(#customer-form.dual-verifiers) { width: min(800px, calc(100vw - 32px)); max-width: 800px; }
+ .dual-verifiers .field { align-content: start; }
+ .dual-verifiers .verifier-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+ .dual-verifiers #c-second-verifier > small { grid-column: 1 / -1; }
+}
+
+/* Separate approval steps only for the two-verifier scheme. */
+.status-flow.status-flow-dual { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 760px) {
+ .status-flow.status-flow-dual { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Verifier identities belong inside Data Nasabah for two-verifier submissions. */
+.dual-customer-data { padding: 20px 22px; }
+.dual-customer-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 20px; }
+.dual-customer-overview > :first-child { grid-column: 1 / -1; grid-template-columns: minmax(145px, calc(21.5% - 6px)) minmax(0, 1fr); }
+.dual-detail-verifiers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.dual-detail-verifier { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.dual-detail-verifier h3 { margin: 0 0 14px; color: #122d56; font-size: 16px; }
+.dual-detail-verifier dl { display: grid; gap: 8px; margin: 0; }
+.dual-detail-verifier .detail-data-row { min-height: 76px; }
+@media (max-width: 760px) {
+ .dual-customer-data { padding: 16px; }
+ .dual-customer-overview, .dual-detail-verifiers { grid-template-columns: minmax(0, 1fr); }
+ .dual-customer-overview > :first-child { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Customer directory opens read-only details from each ordinary row. */
+.customer-directory-table { min-width: 650px; }
+.customer-directory-table .customer-name-col { width: 34%; }
+.customer-directory-table .customer-account-col { width: 26%; }
+.customer-directory-table .customer-cif-col { width: 18%; }
+.customer-directory-table .customer-verifier-col { width: 22%; }
+.customer-directory-table tr[data-customer-detail] { cursor: pointer; }
+.customer-directory-table tr[data-customer-detail]:hover { background: #f5f9ff; }
+.customer-directory-table tr[data-customer-detail]:focus-visible { outline: 2px solid #0756bd; outline-offset: -3px; }

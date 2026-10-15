@@ -32,6 +32,9 @@ def build_execution_report(doc, version, audit, maker):
     sol = next((a for a in reversed(approvals) if a['action'] == 'SOL menyetujui pengajuan'), None)
     if not customer or not sol:
         raise ReportError('Catatan persetujuan belum lengkap. Hubungi pengelola aplikasi.')
+    verifiers = doc.get('verifiers', [])
+    if doc.get('verifier_config') and (len(verifiers) != 2 or any(v['status'] != 'confirmed' for v in verifiers)):
+        raise ReportError('Persetujuan kedua verifikator belum lengkap.')
     original = bytes(version['content'])
     reader = None
     if version['mime'] == 'application/pdf':
@@ -69,8 +72,11 @@ def build_execution_report(doc, version, audit, maker):
     detail = [('Nasabah', doc['customer_name']), ('CIF', doc['cif']), ('Nomor rekening', doc['account']), ('Jabatan', doc['person']), ('Jenis dokumen', doc['kind']), ('Nominal transaksi', amount), ('Rekening tujuan', doc['destination_account'] or 'Belum tercatat'), ('Atas nama rekening tujuan', doc['destination_name'] or 'Belum tercatat')]
     if doc['description']:
         detail.append(('Keterangan', doc['description']))
-    story = [para('SURAT KONFIRMASI PELAKSANAAN', 'ReportTitle'), para('Nomor pengajuan: ' + doc['id'], 'ReportSmall'), para('Pengajuan berikut telah dikonfirmasi nasabah dan disetujui SOL.'), para('RINGKASAN TRANSAKSI', 'ReportHeading'), table(detail), para('PERSETUJUAN', 'ReportHeading'), table([('Nasabah', customer['actor'] + '\n' + timestamp(customer['at'])), ('SOL', sol['actor'] + '\n' + timestamp(sol['at']))]), Spacer(1, 14), para('Dokumen ini merupakan bukti persetujuan, bukan bukti transaksi telah dilaksanakan.', 'ReportSmall'), para('Diterbitkan otomatis berdasarkan catatan BRI VISTA.', 'ReportSmall'), PageBreak(), para('RIWAYAT PERNYATAAN DAN PERSETUJUAN', 'ReportTitle')]
+    customer_approvals = [(f"Verifikator {v['position']}", v['name'] + ' (' + v['person'] + ')\n' + timestamp(v['used_at'])) for v in verifiers] if verifiers else [('Nasabah', customer['actor'] + '\n' + timestamp(customer['at']))]
+    story = [para('SURAT KONFIRMASI PELAKSANAAN', 'ReportTitle'), para('Nomor pengajuan: ' + doc['id'], 'ReportSmall'), para('Pengajuan berikut telah dikonfirmasi nasabah dan disetujui SOL.'), para('RINGKASAN TRANSAKSI', 'ReportHeading'), table(detail), para('PERSETUJUAN', 'ReportHeading'), table(customer_approvals + [('SOL', sol['actor'] + '\n' + timestamp(sol['at']))]), Spacer(1, 14), para('Dokumen ini merupakan bukti persetujuan, bukan bukti transaksi telah dilaksanakan.', 'ReportSmall'), para('Diterbitkan otomatis berdasarkan catatan BRI VISTA.', 'ReportSmall'), PageBreak(), para('RIWAYAT PERNYATAAN DAN PERSETUJUAN', 'ReportTitle')]
     approval_rows = [('Pembuat pengajuan', maker + '\n' + timestamp(doc['created'])), ('Konfirmasi nasabah', customer['actor'] + '\n' + timestamp(customer['at'])), ('Email konfirmasi', doc['email']), ('Pernyataan nasabah', 'Sebagai pihak berwenang, telah memeriksa dan menyetujui surat serta nominal transaksi.'), ('Persetujuan SOL', sol['actor'] + '\n' + timestamp(sol['at']))]
+    if verifiers:
+        approval_rows = [approval_rows[0], *customer_approvals, ('Email konfirmasi', '\n'.join(v['email'] for v in verifiers)), *approval_rows[3:]]
     if sol['notes']:
         approval_rows.append(('Catatan SOL', sol['notes']))
     story.extend([table(approval_rows), para('LOG AKTIVITAS', 'ReportHeading')])

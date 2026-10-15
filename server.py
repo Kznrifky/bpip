@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS outbox(
  id TEXT PRIMARY KEY, doc_id TEXT, version INTEGER, recipient TEXT, subject TEXT,
  body TEXT, status TEXT, attempts INTEGER DEFAULT 0, next_attempt REAL DEFAULT 0,
  error TEXT DEFAULT '', created TEXT, sent_at TEXT);
+CREATE TABLE IF NOT EXISTS document_verifications(
+ doc_id TEXT NOT NULL, version INTEGER NOT NULL, position INTEGER NOT NULL,
+ name TEXT NOT NULL, person TEXT NOT NULL, email TEXT NOT NULL,
+ token_hash TEXT NOT NULL UNIQUE, expires REAL NOT NULL, used_at TEXT,
+ status TEXT NOT NULL DEFAULT 'pending', notes TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY(doc_id,version,position));
 """
 
 def now():
@@ -138,6 +144,12 @@ def initialize():
             db.execute("ALTER TABLE customers ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
         if 'revision' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
             db.execute('ALTER TABLE customers ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
+        customer_columns = {row['name'] for row in db.execute('PRAGMA table_info(customers)')}
+        for column, definition in VERIFIER_COLUMNS.items():
+            if column not in customer_columns:
+                db.execute(f'ALTER TABLE customers ADD COLUMN {column} {definition}')
+        if 'verifier_config' not in {row['name'] for row in db.execute('PRAGMA table_info(documents)')}:
+            db.execute("ALTER TABLE documents ADD COLUMN verifier_config TEXT NOT NULL DEFAULT ''")
         for table in ('documents', 'versions'):
             columns = {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
             for column in ('destination_account', 'destination_name'):
@@ -249,7 +261,36 @@ def transaction_fields(data):
     require(isinstance(destination_name, str) and 0 < len(destination_name.strip()) <= 250, 'Atas nama rekening tujuan wajib diisi, maksimal 250 karakter.')
     return kind, nominal, text_field(data, 'description', 1500, False), destination_account.strip(), destination_name.strip()
 
-CUSTOMER_FIELDS = ('name', 'account', 'person', 'email', 'phone')
+VERIFIER_COLUMNS = {'verification_count': 'INTEGER NOT NULL DEFAULT 1',
+                    **{key: "TEXT NOT NULL DEFAULT ''" for key in ('verifier_name', 'second_name', 'second_person', 'second_email', 'second_phone')}}
+CUSTOMER_FIELDS = ('name', 'account', 'person', 'email', 'phone', *VERIFIER_COLUMNS)
+
+def verifier_fields(data, existing=None):
+    fallback = dict(existing) if existing is not None else {}
+    count = data.get('verification_count', fallback.get('verification_count', 1))
+    require(type(count) is int and count in (1, 2), 'Pilih satu atau dua verifikator.')
+    result = {'verification_count': count}
+    for key in ('verifier_name', 'second_name', 'second_person', 'second_email', 'second_phone'):
+        result[key] = text_field({key: data.get(key, fallback.get(key, ''))}, key, 254 if key == 'second_email' else 250, count == 2) if count == 2 else ''
+    if count == 2:
+        result['second_email'] = valid_email(result['second_email'])
+        result['second_phone'] = valid_phone(result['second_phone'])
+        require(result['second_email'] != valid_email(data.get('email', fallback.get('email', ''))), 'Email kedua verifikator harus berbeda.')
+    return result
+
+def normalized_customer_snapshot(customer):
+    return {**{'verification_count': 1, 'verifier_name': '', 'second_name': '', 'second_person': '', 'second_email': '', 'second_phone': ''}, **dict(customer)}
+
+def verification_rows(db, doc):
+    rows = [dict(row) for row in db.execute('SELECT position,name,person,email,status,used_at,notes FROM document_verifications WHERE doc_id=? AND version=? ORDER BY position', (doc['id'], doc['version']))]
+    config = json.loads(doc['verifier_config']) if doc['verifier_config'] else []
+    for row in rows:
+        row['phone'] = config[row['position'] - 1].get('phone', '') if row['position'] <= len(config) else ''
+    return rows
+
+def verification_progress(db, doc):
+    rows = verification_rows(db, doc)
+    return {'required': len(rows) or 1, 'confirmed': sum(row['status'] == 'confirmed' for row in rows) if rows else int(doc['customer_status'] == 'confirmed'), 'verifiers': rows}
 
 def customer_snapshot(customer):
     return {key: customer[key] for key in ('cif', *CUSTOMER_FIELDS, 'revision')}
@@ -278,6 +319,8 @@ def add_audit(db, doc, action, actor, notes='', ip='', agent=''):
 
 def enqueue(db, doc, upload, actor, ip, agent, channel='email'):
     require(channel in ('email', 'whatsapp', 'both'), 'Pilih Email, WhatsApp, atau Keduanya.')
+    dual = bool(doc['verifier_config'])
+    require(not dual or channel == 'email', 'Dua verifikator menerima link pribadi masing-masing melalui Email.')
     if channel != 'email':
         customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
         require(customer is not None and customer['phone'], 'Nomor HP nasabah belum tersedia. Pilih Email atau minta SOL melengkapi nomor HP.')
@@ -286,6 +329,22 @@ def enqueue(db, doc, upload, actor, ip, agent, channel='email'):
     stamp = now()
     expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
     db.execute('INSERT INTO versions(doc_id,version,filename,mime,content,sha256,nominal,token_hash,expires,used_at,created,destination_account,destination_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp, doc['destination_account'], doc['destination_name']))
+    if dual:
+        previous = {row['position']: row for row in db.execute('SELECT * FROM document_verifications WHERE doc_id=? AND version=?', (doc['id'], doc['version'] - 1))}
+        for position, verifier in enumerate(json.loads(doc['verifier_config']), 1):
+            prior = previous.get(position)
+            confirmed = prior is not None and prior['status'] == 'confirmed'
+            private_token = secrets.token_urlsafe(32)
+            db.execute('INSERT INTO document_verifications(doc_id,version,position,name,person,email,token_hash,expires,used_at,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       (doc['id'], doc['version'], position, verifier['name'], verifier['person'], verifier['email'], digest(private_token), expiry, prior['used_at'] if confirmed else None, 'confirmed' if confirmed else 'pending', prior['notes'] if confirmed else ''))
+            if confirmed:
+                continue
+            personal = {**dict(doc), 'person': verifier['person'], 'verifier_name': verifier['name']}
+            body = confirmation_body(personal, f'{BASE_URL}/#confirm/{private_token}', expiry, ttl_hours=int(os.getenv('TOKEN_TTL_HOURS', '24')))
+            db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)',
+                       (secrets.token_hex(16), doc['id'], doc['version'], verifier['email'], f"BRI VISTA - Verifikasi Transaksi | {doc['id']}", body, 'queued', stamp))
+        add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, 'Kanal: Email · Persetujuan wajib dari kedua verifikator', ip, agent)
+        return None
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
     subject = f"BRI VISTA - Verifikasi Transaksi | {doc['id']}"
     body = confirmation_body(doc, f'{BASE_URL}/#confirm/{token}', expiry, ttl_hours=int(os.getenv('TOKEN_TTL_HOURS', '24')))
@@ -301,12 +360,16 @@ def resend_available_at(db, doc):
     return datetime.fromisoformat(stamp).timestamp() + 24 * 60 * 60
 
 def confirmation_delivery(db, doc):
+    if doc['verifier_config']:
+        requested = db.execute('SELECT 1 FROM outbox WHERE doc_id=? AND version=? LIMIT 1', (doc['id'], doc['version'])).fetchone()
+        return {'email_requested': bool(requested), 'whatsapp_prepared': False}
     mail = db.execute('SELECT status FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
     whatsapp = db.execute("SELECT 1 FROM audit WHERE doc_id=? AND version=? AND (action='Konfirmasi WhatsApp disiapkan' OR notes LIKE 'Kanal: Email dan WhatsApp manual%') LIMIT 1", (doc['id'], doc['version'])).fetchone()
     return {'email_requested': bool(mail and mail['status'] not in ('whatsapp_manual', 'cancelled')), 'whatsapp_prepared': bool(whatsapp)}
 
 def send_current_confirmation(db, doc, channel, actor, ip, agent):
     require(channel in ('email', 'whatsapp', 'both'), 'Pilih Email, WhatsApp, atau Keduanya.')
+    require(not doc['verifier_config'], 'Email untuk kedua verifikator sudah disiapkan. Gunakan Kirim ulang jika link kedaluwarsa.', 409)
     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Konfirmasi tersedia saat pengajuan masih menunggu respons nasabah.', 409)
     version = db.execute('SELECT expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     require(version and not version['used_at'] and version['expires'] > time.time(), 'Tautan sudah tidak berlaku. Gunakan Kirim ulang untuk membuat tautan baru.', 409)
@@ -325,6 +388,7 @@ def send_current_confirmation(db, doc, channel, actor, ip, agent):
     return preview
 
 def whatsapp_preview(db, doc):
+    require(not doc['verifier_config'], 'Dua verifikator menerima link pribadi masing-masing melalui Email.', 409)
     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'WhatsApp tersedia saat pengajuan masih menunggu respons nasabah.', 409)
     version = db.execute('SELECT token_hash,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     require(version is not None and not version['used_at'] and version['expires'] > time.time(), 'Tautan sudah tidak berlaku. Kirim tautan baru terlebih dahulu.', 409)
@@ -355,11 +419,16 @@ def document_summary(db, row):
     maker = db.execute('SELECT name FROM users WHERE id=?', (doc['maker'],)).fetchone()
     doc['maker_name'] = maker['name'] if maker else 'Petugas'
     mail = db.execute('SELECT id,status,error,sent_at FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
+    if doc['verifier_config'] and doc['customer_status'] == 'pending':
+        mail = db.execute("SELECT id,status,error,sent_at FROM outbox WHERE doc_id=? AND version=? AND recipient IN (SELECT email FROM document_verifications WHERE doc_id=? AND version=? AND status='pending') ORDER BY CASE status WHEN 'failed' THEN 0 WHEN 'retry' THEN 1 WHEN 'sending' THEN 2 WHEN 'queued' THEN 3 ELSE 4 END,created DESC LIMIT 1", (doc['id'], doc['version'], doc['id'], doc['version'])).fetchone()
     doc['mail'] = dict(mail) if mail else None
     doc['delivery'] = confirmation_delivery(db, doc)
     version = db.execute('SELECT filename,mime,sha256,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     doc['file'] = dict(version) if version else None
     doc['resend_available_at'] = resend_available_at(db, doc)
+    doc['verification'] = verification_progress(db, doc)
+    # The stored configuration is internal; never expose any token hash.
+    doc.pop('verifier_config', None)
     return doc
 
 def owned_document(db, doc_id, user, shared_read=False):
@@ -378,16 +447,21 @@ def archive_document(db, doc, user, ip, agent):
 
 def portal_document(db, token):
     require(isinstance(token, str) and 20 <= len(token) <= 100, 'Tautan konfirmasi tidak valid.', 404)
-    version = db.execute('SELECT * FROM versions WHERE token_hash=?', (digest(token),)).fetchone()
+    verifier = db.execute('SELECT * FROM document_verifications WHERE token_hash=?', (digest(token),)).fetchone()
+    version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (verifier['doc_id'], verifier['version'])).fetchone() if verifier else db.execute('SELECT * FROM versions WHERE token_hash=?', (digest(token),)).fetchone()
     require(version is not None, 'Tautan konfirmasi tidak ditemukan.', 404)
     doc = db.execute('SELECT * FROM documents WHERE id=?', (version['doc_id'],)).fetchone()
+    require(verifier is not None or not doc['verifier_config'], 'Tautan konfirmasi tidak ditemukan.', 404)
     require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc['id'],)).fetchone(), 'Pengajuan sudah dihapus dari daftar.', 410)
     require(doc['sol_status'] != 'cancelled', 'Pengajuan telah dibatalkan oleh petugas.', 410)
     require(doc['version'] == version['version'], 'Surat telah direvisi. Gunakan tautan dari email terbaru.', 410)
+    if verifier:
+        require(not verifier['used_at'], 'Keputusan Anda sudah tercatat. Tautan ini telah digunakan.', 410)
+        require(verifier['expires'] > time.time(), 'Tautan telah kedaluwarsa. Hubungi petugas untuk meminta email baru.', 410)
     require(not version['used_at'], 'Keputusan Anda sudah tercatat. Tautan ini telah digunakan.', 410)
     require(version['expires'] > time.time(), 'Tautan telah kedaluwarsa. Hubungi petugas untuk meminta email baru.', 410)
     require(doc['customer_status'] == 'pending', 'Pengajuan ini tidak lagi menerima konfirmasi.', 409)
-    return doc, version
+    return doc, version, verifier
 
 def build_confirmation_email(row):
     """Accurate sender identity and RFC-compliant transactional message."""
@@ -422,7 +496,8 @@ def deliver_one():
             return False
         doc = db.execute('SELECT * FROM documents WHERE id=?', (row['doc_id'],)).fetchone()
         version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (row['doc_id'], row['version'])).fetchone()
-        if not doc or db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (row['doc_id'],)).fetchone() or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time():
+        verifier = db.execute('SELECT status FROM document_verifications WHERE doc_id=? AND version=? AND email=?', (row['doc_id'], row['version'], row['recipient'])).fetchone()
+        if not doc or db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (row['doc_id'],)).fetchone() or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time() or (verifier and verifier['status'] != 'pending'):
             db.execute("UPDATE outbox SET status='cancelled' WHERE id=?", (row['id'],))
             return True
         db.execute("UPDATE outbox SET status='sending', attempts=attempts+1, next_attempt=? WHERE id=?", (time.time() + 120, row['id']))
@@ -571,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
                     rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC')
                     summaries = [document_summary(db, r) for r in rows]
                     if user['role']=='boh':
-                        summaries = [{k:d[k] for k in ('id','cif','customer_name','maker_name','kind','nominal','version','customer_status','sol_status','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None} for d in summaries]
+                        summaries = [{k:d[k] for k in ('id','cif','customer_name','maker_name','kind','nominal','version','customer_status','sol_status','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None, 'verification': {key:d['verification'][key] for key in ('required','confirmed')}} for d in summaries]
                     return self.respond({'documents': summaries, 'archived_count': db.execute('SELECT COUNT(*) FROM archived_documents').fetchone()[0] if user['role']=='sol' else 0})
                 if path in ('/api/customers/archived','/api/documents/archived'):
                     require(user['role']=='sol', 'Hanya SOL yang dapat mengelola arsip.', 403)
@@ -588,7 +663,10 @@ class Handler(BaseHTTPRequestHandler):
                     audit = [dict(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id', (doc['id'],))]
                     maker = db.execute('SELECT name FROM users WHERE id=?', (doc['maker'],)).fetchone()
                     try:
-                        content = build_execution_report(dict(doc), dict(version), audit, maker['name'] if maker else 'Tidak tercatat')
+                        report_doc = dict(doc)
+                        if doc['verifier_config']:
+                            report_doc['verifiers'] = verification_rows(db, doc)
+                        content = build_execution_report(report_doc, dict(version), audit, maker['name'] if maker else 'Tidak tercatat')
                     except ReportError as err:
                         raise AppError(422, str(err))
                     self.send_response(200)
@@ -683,7 +761,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(result, cookie=cookie)
         if path in ('/api/portal', '/api/portal/decision', '/api/portal/file'):
             with database(True) as db:
-                doc, version = portal_document(db, data.get('token'))
+                doc, version, verifier = portal_document(db, data.get('token'))
                 if path.endswith('/file'):
                     return self.send_file(version)
                 if path.endswith('/decision'):
@@ -692,12 +770,25 @@ class Handler(BaseHTTPRequestHandler):
                     require(data.get('acknowledged') is True, 'Periksa detail surat dan centang pernyataan terlebih dahulu.')
                     notes = text_field(data, 'notes', 1500, decision == 'rejected')
                     stamp = now()
-                    db.execute('UPDATE versions SET used_at=? WHERE doc_id=? AND version=?', (stamp, doc['id'], doc['version']))
-                    db.execute('UPDATE documents SET customer_status=?,updated=? WHERE id=?', (decision, stamp, doc['id']))
-                    add_audit(db, doc, 'Nasabah menyetujui surat' if decision == 'confirmed' else 'Nasabah menolak surat', doc['person'] + ' (Nasabah)', notes + f" · Nominal Rp {doc['nominal']:,} · Pernyataan diperiksa dan disetujui", ip, agent)
+                    aggregate = decision
+                    actor = doc['person'] + ' (Nasabah)'
+                    if verifier:
+                        db.execute('UPDATE document_verifications SET status=?,used_at=?,notes=? WHERE doc_id=? AND version=? AND position=?', (decision, stamp, notes, doc['id'], doc['version'], verifier['position']))
+                        decisions = verification_rows(db, doc)
+                        aggregate = 'rejected' if any(row['status'] == 'rejected' for row in decisions) else 'confirmed' if all(row['status'] == 'confirmed' for row in decisions) else 'pending'
+                        actor = verifier['name'] + ' (' + verifier['person'] + ' · Verifikator ' + str(verifier['position']) + ')'
+                    if aggregate != 'pending':
+                        db.execute('UPDATE versions SET used_at=? WHERE doc_id=? AND version=?', (stamp, doc['id'], doc['version']))
+                        if verifier:
+                            db.execute("UPDATE outbox SET status='cancelled' WHERE doc_id=? AND version=? AND status IN ('queued','retry','failed')", (doc['id'], doc['version']))
+                    db.execute('UPDATE documents SET customer_status=?,updated=? WHERE id=?', (aggregate, stamp, doc['id']))
+                    add_audit(db, doc, 'Nasabah menyetujui surat' if decision == 'confirmed' else 'Nasabah menolak surat', actor, notes + f" · Nominal Rp {doc['nominal']:,} · Pernyataan diperiksa dan disetujui", ip, agent)
                     db.commit()
-                    return self.respond({'message': 'Keputusan Anda berhasil dicatat.', 'decision': decision})
-                return self.respond({'document': {key: doc[key] for key in ('id', 'customer_name', 'person', 'kind', 'nominal', 'description', 'destination_account', 'destination_name', 'version', 'created')}, 'file': {'filename': version['filename'], 'mime': version['mime'], 'sha256': version['sha256']}, 'expires': version['expires']})
+                    return self.respond({'message': 'Keputusan Anda berhasil dicatat.', 'decision': decision, 'customer_status': aggregate, 'verification': {'required': 2 if verifier else 1, 'confirmed': verification_progress(db, doc)['confirmed'] if verifier else int(aggregate == 'confirmed')}})
+                public_doc = {key: doc[key] for key in ('id', 'customer_name', 'person', 'kind', 'nominal', 'description', 'destination_account', 'destination_name', 'version', 'created')}
+                if verifier:
+                    public_doc['person'] = verifier['person']
+                return self.respond({'document': public_doc, 'file': {'filename': version['filename'], 'mime': version['mime'], 'sha256': version['sha256']}, 'expires': version['expires'], 'verifier': {'name': verifier['name'], 'position': verifier['position']} if verifier else None, 'verification_required': 2 if verifier else 1})
         with database(True) as db:
             user = self.session(db, True)
             if path == '/api/logout':
@@ -798,9 +889,9 @@ class Handler(BaseHTTPRequestHandler):
                 if decision == 'approved':
                     customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (request['cif'],)).fetchone()
                     require(customer is not None, 'Nasabah sudah dihapus. Pembaruan tidak dapat disetujui.', 409)
-                    before, after = json.loads(request['old_data']), json.loads(request['new_data'])
+                    before, after = normalized_customer_snapshot(json.loads(request['old_data'])), normalized_customer_snapshot(json.loads(request['new_data']))
                     require(customer_snapshot(customer) == before, 'Data nasabah sudah berubah. Tolak permintaan ini dan minta SOL mengajukan pembaruan baru.', 409)
-                    db.execute('UPDATE customers SET name=?,account=?,person=?,email=?,phone=?,revision=revision+1 WHERE cif=?', (*[after[key] for key in CUSTOMER_FIELDS], request['cif']))
+                    db.execute('UPDATE customers SET '+','.join(key+'=?' for key in CUSTOMER_FIELDS)+',revision=revision+1 WHERE cif=?', (*[after[key] for key in CUSTOMER_FIELDS], request['cif']))
                 db.execute('UPDATE customer_edit_requests SET status=?,reviewed_by=?,reviewed_name=?,review_notes=?,reviewed_at=? WHERE id=?', (decision, user['id'], user['name'], notes, now(), request['id']))
                 management_audit(db, 'customers/' + request['cif'], ('BOH menyetujui' if decision == 'approved' else 'BOH menolak') + ' pembaruan: ' + request['id'], user)
                 db.commit()
@@ -816,6 +907,7 @@ class Handler(BaseHTTPRequestHandler):
                 account = text_field(data, 'account', 15)
                 require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
                 proposed = {'name': text_field(data, 'name'), 'account': account, 'person': text_field(data, 'person'), 'email': valid_email(text_field(data, 'email', 254)), 'phone': valid_phone(text_field(data, 'phone', 30))}
+                proposed.update(verifier_fields(data, customer))
                 request_id = request_customer_edit(db, customer, proposed, text_field(data, 'reason', 1500), user)
                 db.commit()
                 return self.respond({'id': request_id, 'status': 'pending'}, 201)
@@ -834,7 +926,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         doc = db.execute('SELECT customer_status FROM documents WHERE id=?', (key,)).fetchone()
                         require(doc and doc['customer_status'] != 'confirmed', 'Pengajuan yang sudah disetujui nasabah tidak dapat dihapus.', 409)
-                        for child in ('outbox','versions'):
+                        for child in ('outbox','document_verifications','versions'):
                             db.execute(f'DELETE FROM {child} WHERE doc_id=?',(key,))
                         db.execute('DELETE FROM documents WHERE id=?',(key,))
                 db.execute(f'DELETE FROM {table} WHERE {col}=?',(key,))
@@ -923,7 +1015,8 @@ class Handler(BaseHTTPRequestHandler):
                 require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
                 values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')), valid_phone(text_field(data, 'phone', 30)))
                 require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (cif,)).fetchone(), 'CIF sudah terdaftar.', 409)
-                db.execute('INSERT INTO customers(cif,name,account,person,email,phone) VALUES(?,?,?,?,?,?)', values)
+                verification = verifier_fields(data)
+                db.execute('INSERT INTO customers(cif,name,account,person,email,phone,'+','.join(VERIFIER_COLUMNS)+') VALUES(?,?,?,?,?,?,'+','.join('?' for _ in VERIFIER_COLUMNS)+')', (*values, *verification.values()))
                 db.commit()
                 return self.respond({'ok': True}, 201)
             if path == '/api/documents':
@@ -937,6 +1030,9 @@ class Handler(BaseHTTPRequestHandler):
                 stamp = now()
                 values = (doc_id, customer['cif'], customer['name'], customer['account'], customer['person'], customer['email'], kind, nominal, description, user['id'], 1, 'pending', 'pending', '', stamp, stamp, destination_account, destination_name)
                 db.execute('INSERT INTO documents(id,cif,customer_name,account,person,email,kind,nominal,description,maker,version,customer_status,sol_status,sol_notes,created,updated,destination_account,destination_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
+                if customer['verification_count'] == 2:
+                    config = [{'name': customer['verifier_name'], 'person': customer['person'], 'email': customer['email'], 'phone': customer['phone']}, {'name': customer['second_name'], 'person': customer['second_person'], 'email': customer['second_email'], 'phone': customer['second_phone']}]
+                    db.execute('UPDATE documents SET verifier_config=? WHERE id=?', (json.dumps(config), doc_id))
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
                 preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
                 db.commit()

@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/js/app.js'), 'utf8');
 const context = vm.createContext({state: {documents: []}});
-for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'bindDocumentRows']) {
+for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail']) {
   const start = source.indexOf('function ' + name + '(');
   assert.ok(start >= 0, 'Missing ' + name);
   let cursor = source.indexOf('{', start), depth = 0, end;
@@ -125,4 +125,99 @@ test('Rejected reviews use a cross and never a completed approval check', () => 
   const approved = context.renderDocumentProgress(doc('done', 'confirmed', 'approved'));
   assert.equal((approved.match(/data-icon="check"/g) || []).length, 3);
   assert.ok(!approved.includes('status-step rejected'));
+});
+
+
+test('Partial two-verifier approval remains in customer review and cannot open SOL actions', () => {
+  const partial = {...doc('dual-partial', 'pending', 'pending'), verification:{required:2, confirmed:1, verifiers:[{position:1,status:'confirmed'},{position:2,status:'pending'}]}};
+  assert.equal(context.customerReviewText(partial, 'Menunggu'), 'Menunggu verifikator lainnya');
+  assert.equal(context.kpiReviewStatus('pending', partial), 'pending');
+  assert.equal(context.kpiReviewStatus('review', partial), null);
+  assert.equal(context.historyOutcome(partial), null);
+  assert.ok(!context.renderSolDecision(partial).includes('data-decision="approved"'));
+  assert.ok(context.renderDocumentProgress(partial).includes('Verifikator 2'));
+  assert.equal((context.renderDocumentProgress(partial).match(/<li /g)||[]).length, 4);
+  const complete = {...partial, customer_status:'confirmed', verification:{required:2, confirmed:2}};
+  assert.equal(context.kpiReviewStatus('review', complete), 'pending');
+  assert.ok(context.renderSolDecision(complete).includes('data-decision="approved"'));
+});
+
+
+test('Four detail steps track each verifier independently and stop after a rejection', () => {
+  context.icon = symbol => `<svg data-icon="${symbol}"></svg>`;
+  const dual = {...doc('dual', 'pending', 'pending'),verification:{required:2,confirmed:1,verifiers:[{position:1,status:'pending'},{position:2,status:'confirmed'}]}};
+  const html=context.renderDocumentProgress(dual);
+  const steps=html.match(/<li [\s\S]*?<\/li>/g);
+  assert.equal(steps.length,4);
+  assert.ok(steps[1].includes('current'));
+  assert.ok(steps[1].includes('Verifikator 1'));
+  assert.ok(steps[2].includes('complete'));
+  assert.ok(steps[2].includes('Verifikator 2'));
+  assert.ok(!html.includes('Review nasabah'));
+  const rejected={...dual,customer_status:'rejected',verification:{required:2,confirmed:0,verifiers:[{position:1,status:'pending'},{position:2,status:'rejected'}]}};
+  const stopped=context.renderDocumentProgress(rejected).match(/<li [\s\S]*?<\/li>/g);
+  assert.ok(stopped[2].includes('data-icon="close"'));
+  assert.ok(stopped[1].includes('Tidak dilanjutkan'));
+  assert.ok(stopped[3].includes('Tidak dilanjutkan'));
+  const single=context.renderDocumentProgress(doc('single','pending','pending'));
+  assert.equal((single.match(/<li /g)||[]).length,3);
+  assert.ok(single.includes('Review nasabah'));
+});
+
+
+test('Data Nasabah groups both verifier identities with their own phone and email', () => {
+  const d={customer_name:'PT Contoh',cif:'777',account:'000123456789012',verification:{required:2,verifiers:[{position:1,name:'Adi',person:'Direktur',phone:'081111111111',email:'adi@example.test'},{position:2,name:'Maya',person:'Komisaris',phone:'082222222222',email:'maya@example.test'}]}};
+  const html=context.renderDualCustomerData(d,(label,value)=>`<div>${label}: ${value}</div>`,'');
+  assert.ok(html.includes('aria-label="Verifikator 1"'));
+  assert.ok(html.includes('aria-label="Verifikator 2"'));
+  for(const value of ['Adi','Maya','Direktur','Komisaris','081111111111','082222222222','adi@example.test','maya@example.test'])assert.ok(html.includes(value));
+  assert.equal((html.match(/Nama Verifikator/g)||[]).length,2);
+  assert.ok(!html.includes('Disetujui'));
+});
+
+
+test('Customer directory contains only the four requested columns', () => {
+  const target={innerHTML:'',querySelectorAll:()=>[]}, count={};
+  context.$=selector=>selector==='#customer-table'?target:selector==='#customer-list-count'?count:null;
+  context.labelRecordTables=()=>{};
+  Object.assign(context.state,{customerEditMode:false,customerDeleteMode:false,customerSearch:'',customerSelected:[],customerUpdates:[],customers:[{cif:'123',name:'PT Satu',account:'000123456789012',person:'Direktur',email:'private@example.test',phone:'081234567890',verification_count:1},{cif:'456',name:'PT Dua',account:'000987654321012',verification_count:2}]});
+  context.renderCustomerTable();
+  const html=target.innerHTML;
+  assert.equal((html.match(/<th>/g)||[]).length,4);
+  for(const label of ['Nama Nasabah','Nomor Rekening','CIF','Jumlah Verifikator'])assert.ok(html.includes('<th>'+label+'</th>'));
+  assert.ok(!html.includes('private@example.test'));
+  assert.ok(html.includes('href="#customer/123"'));
+  assert.ok(html.includes('data-customer-detail="456"'));
+  context.state.customerEditMode=true;
+  context.document={querySelectorAll:()=>[]};
+  context.renderCustomerTable();
+  assert.ok(target.innerHTML.includes('data-customer-pick="123"'));
+  assert.ok(!target.innerHTML.includes('data-customer-detail='));
+  context.state.customerEditMode=false;
+});
+
+test('Customer row click and keyboard open details without intercepting controls or selected text', () => {
+  let selected='',route='';const handlers={};
+  const row={dataset:{customerDetail:'123'},addEventListener:(type,fn)=>{handlers[type]=fn;}};
+  context.window={getSelection:()=>({toString:()=>selected})};
+  context.go=value=>{route=value;};context.bindCustomerRows({querySelectorAll:()=>[row]});
+  handlers.click({target:{closest:()=>true}});assert.equal(route,'');
+  selected='PT Satu';handlers.click({target:{closest:()=>null}});assert.equal(route,'');
+  selected='';handlers.click({target:{closest:()=>null}});assert.equal(route,'customer/123');
+  route='';let prevented=false;handlers.keydown({target:row,key:'Enter',preventDefault:()=>{prevented=true;}});
+  assert.equal(route,'customer/123');assert.ok(prevented);
+});
+
+test('Customer detail keeps the original six fields for one and uses two verifier boxes for two', () => {
+  const main={innerHTML:''};context.$=()=>main;
+  context.icon=symbol=>`<svg>${symbol}</svg>`;
+  context.state.customers=[{cif:'123',name:'PT Satu',account:'000123456789012',person:'Direktur',email:'satu@example.test',phone:'081234567890',verification_count:1},{cif:'456',name:'PT Dua',account:'000987654321012',person:'Direktur',email:'dua@example.test',phone:'081234567890',verification_count:2,verifier_name:'Adi',second_name:'Maya',second_person:'Komisaris',second_email:'maya@example.test',second_phone:'082234567890'}];
+  context.renderCustomerDetail('123');
+  for(const label of ['Nama nasabah','Jabatan','Nomor rekening','CIF','Email','No HP'])assert.ok(main.innerHTML.includes('<span>'+label+'</span>'));
+  assert.ok(!main.innerHTML.includes('dual-detail-verifier'));
+  context.renderCustomerDetail('456');
+  assert.ok(main.innerHTML.includes('aria-label="Verifikator 1"'));
+  assert.ok(main.innerHTML.includes('aria-label="Verifikator 2"'));
+  assert.ok(main.innerHTML.includes('082234567890'));
+  assert.ok(main.innerHTML.includes('data-route="customers"'));
 });
