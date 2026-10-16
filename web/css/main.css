@@ -909,7 +909,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 .status-step.rejected .status-step-marker { color: #fff; background: #ef4444; border-color: #ef4444; }
 .status-step.rejected .status-step-copy > span { color: #dc2626; }
 
-/* Only the SOL approval button uses the requested green action color. */
+/* Only the AMOL approval button uses the requested green action color. */
 .detail-decision-card .btn[data-decision="approved"] { color: #fff; background: #166534; border-color: #166534; }
 .detail-decision-card .btn[data-decision="approved"]:hover { background: #14532d; border-color: #14532d; }
 
@@ -968,4 +968,15 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 /* Keep the date filter clear of short table cards and inside the viewport. */
 @media (min-width: 761px) {
  .date-range-panel { position: fixed; right: auto; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+}
+
+/* Description spans both transaction columns below their values. */
+.detail-transaction-card > .detail-paired-data { padding-bottom: 8px; }
+.detail-transaction-description { margin: 0; padding: 0 22px 20px; }
+.detail-transaction-description .detail-data-row { grid-template-columns: minmax(145px, calc(21.5% - 10.75px)) minmax(0, 1fr); }
+@media (max-width: 1100px) {
+ .detail-transaction-description .detail-data-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+ .detail-transaction-description { padding: 0 16px 16px; }
 }

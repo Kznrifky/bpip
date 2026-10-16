@@ -24,7 +24,7 @@ from confirmation_email import expiry_label
 spec = importlib.util.spec_from_file_location('bpip', Path(__file__).resolve().parents[1] / 'server.py')
 app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
-DESTINATION = {'destination_account': '000123456789012', 'destination_name': 'PT Tujuan Pembayaran'}
+DESTINATION = {'destination_bank': 'BRI', 'destination_account': '000123456789012', 'destination_name': 'PT Tujuan Pembayaran'}
 FILE = {'name': 'surat.pdf', 'base64': base64.b64encode(b'%PDF-1.4\nSample integration fixture\n%%EOF').decode()}
 
 class Client:
@@ -186,6 +186,40 @@ class WorkflowTests(unittest.TestCase):
             body = db.execute('SELECT body FROM outbox WHERE doc_id=?', (doc,)).fetchone()['body']
         self.assertIn(DESTINATION['destination_account'], body)
         self.assertIn(DESTINATION['destination_name'], body)
+        self.assertIn('Bank Rekening Tujuan: BRI', body)
+
+    def test_destination_account_lengths_follow_selected_bank(self):
+        payload = {'cif': '1234567', 'kind': 'Warkat', 'nominal': 100, 'file': FILE, **DESTINATION}
+        configured = self.maker.call('/config')[1]['destination_banks']
+        self.assertEqual({bank['value'] for bank in configured}, {'BRI', 'BCA', 'BNI', 'Mandiri', 'BSI', 'CIMB Niaga', 'BTN', 'Danamon', 'OCBC'})
+        for bank in configured:
+            for length in bank['lengths']:
+                account = '0' + '1' * (length - 1)
+                with self.subTest(bank=bank['value'], length=length):
+                    status, result, _ = self.maker.call('/documents', {**payload, 'destination_bank': bank['value'], 'destination_account': account})
+                    self.assertEqual(status, 201, result)
+                    detail = self.maker.call('/documents/' + result['id'])[1]['document']
+                    self.assertEqual(detail['destination_bank'], bank['value'])
+                    self.assertEqual(detail['destination_account'], account)
+                    self.assertEqual(detail['versions'][0]['destination_bank'], bank['value'])
+            for invalid in ('1' * (min(bank['lengths']) - 1), '1' * (max(bank['lengths']) + 1), '1a' * 5, '１２３４５６７８９０'):
+                self.assertEqual(self.maker.call('/documents', {**payload, 'destination_bank': bank['value'], 'destination_account': invalid})[0], 400)
+        for invalid in ('Bank Palsu', '<script>', [], {}):
+            self.assertEqual(self.maker.call('/documents', {**payload, 'destination_bank': invalid})[0], 400)
+        for invalid in ('PT Tujuan 123', 'PT. Tujuan', 'Tujuan-Penerima', 'Éka', '   '):
+            self.assertEqual(self.maker.call('/documents', {**payload, 'destination_name': invalid})[0], 400)
+
+    def test_execution_download_busy_request_does_not_release_active_lock(self):
+        doc = self.create(); self.respond(self.token(doc))
+        self.assertEqual(self.sol.call('/documents/'+doc+'/review', {'version':1,'decision':'approved'})[0], 200)
+        app.EXECUTION_PDF_LOCK.acquire()
+        try:
+            status, result, _ = self.maker.call('/documents/'+doc+'/execution-pdf')
+            self.assertEqual(status, 503)
+            self.assertIn('sedang diproses', result['error'])
+            self.assertTrue(app.EXECUTION_PDF_LOCK.locked())
+        finally:
+            app.EXECUTION_PDF_LOCK.release()
 
     def test_disabled_revision_preserves_destination_snapshot(self):
         doc = self.create()
@@ -239,10 +273,23 @@ class WorkflowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(body))
         self.assertEqual(len(reader.pages),3)  # Two report pages plus the original, no blank cover.
         text='\n'.join(page.extract_text() for page in reader.pages)
-        for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','SOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
+        for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','AMOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
             self.assertIn(expected,text)
         self.assertEqual(reader.attachments['si-original.pdf'][0],original.getvalue())
         self.assertNotIn(self.token(doc),text)
+        # Existing audit rows retain their original wording in storage while
+        # the current UI and PDF use the renamed reviewer label.
+        with app.database(True) as db:
+            db.execute("UPDATE audit SET action=replace(action,'AMOL','SOL'),actor=replace(actor,'(AMOL)','(SOL)') WHERE doc_id=?", (doc,))
+        status, legacy_pdf, _ = self.maker.call(route)
+        self.assertEqual(status, 200)
+        legacy_text = '\n'.join(page.extract_text() for page in PdfReader(BytesIO(legacy_pdf)).pages)
+        self.assertIn('AMOL menyetujui pengajuan', legacy_text)
+        self.assertNotIn('SOL menyetujui pengajuan', legacy_text)
+        actions = self.maker.call('/documents/'+doc)[1]['document']['audit']
+        self.assertTrue(any(a['action']=='AMOL menyetujui pengajuan' for a in actions))
+        with app.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE doc_id=? AND action='SOL menyetujui pengajuan'", (doc,)).fetchone()[0], 1)
         self.assertEqual(self.sol.call(route)[0],200)
         app.create_user('observer@example.test','BOH','boh','ObserverTest!2026')
         boh=Client(self.url);boh.call('/login',{'email':'observer@example.test','password':'ObserverTest!2026'})
@@ -254,7 +301,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.sol.call(route)[0],200)
 
     def test_execution_pdf_images_and_unreadable_original(self):
-        image=BytesIO();Image.new('RGB',(800,1200),'white').save(image,format='PNG')
+        image=BytesIO()
+        with Image.new('RGBA',(10646,4965),(255,255,255,0)) as source:
+            source.save(image,format='PNG')
         payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':{'name':'si.png','base64':base64.b64encode(image.getvalue()).decode()}}
         doc=self.maker.call('/documents',payload)[1]['id']
         self.respond(self.token(doc));self.sol.call('/documents/'+doc+'/review',{'version':1,'decision':'approved','notes':''})
@@ -263,8 +312,13 @@ class WorkflowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(body))
         self.assertEqual(len(reader.pages),3)
         self.assertEqual(reader.attachments['si.png'][0],image.getvalue())
+        embedded = reader.pages[-1].images[0].image
+        self.assertLessEqual(embedded.width, 1240)
+        self.assertLessEqual(embedded.height, 1754)
+        self.assertEqual(embedded.convert('RGB').getpixel((0,0)), (255,255,255))
         malformed=self.create();self.respond(self.token(malformed));self.sol.call('/documents/'+malformed+'/review',{'version':1,'decision':'approved','notes':''})
         self.assertEqual(self.sol.call('/documents/'+malformed+'/execution-pdf')[0],422)
+        self.assertFalse(app.EXECUTION_PDF_LOCK.locked())
 
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
@@ -518,7 +572,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(d['versions']),2)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/versions/1/file')[0],200)
         self.assertEqual(self.maker.call('/documents/'+doc_id+'/versions/3/file')[0],404)
-        self.assertTrue(any(a['action']=='SOL menyetujui pengajuan' for a in d['audit']))
+        self.assertTrue(any(a['action']=='AMOL menyetujui pengajuan' for a in d['audit']))
         self.assertTrue(any(a['ip'] for a in d['audit']))
         self.assertEqual(self.customer.call('/documents')[0],401)
 
@@ -686,7 +740,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.sol.call('/documents/restore-all',{})[0],200)
         d=self.sol.call('/documents/'+doc_id)[1]['document']
         self.assertEqual(len(d['versions']),1)
-        self.assertTrue(any(a['action']=='SOL memulihkan pengajuan' for a in d['audit']))
+        self.assertTrue(any(a['action']=='AMOL memulihkan pengajuan' for a in d['audit']))
         self.assertEqual(self.customer.call('/portal',{'token':token})[0],410)
         self.assertEqual(len(self.maker.call('/customers')[1]['customers']),3)
     def test_customer_delete_preserves_existing_documents_and_restore(self):
@@ -889,10 +943,6 @@ class WorkflowTests(unittest.TestCase):
         row['body']='Yth. <script>alert(1)</script>,\n\n'+app.BASE_URL+'/#confirm/test_token\n\nJangan bagikan tautan ini.'
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':'sender@gmail.com','SMTP_FROM':'BPIP <other@example.com>'}):
             message,sender=app.build_confirmation_email(row)
-            second_message,_=app.build_confirmation_email(row)
-        first_logo=next(part for part in message.walk() if part.get_content_type()=='image/png')
-        second_logo=next(part for part in second_message.walk() if part.get_content_type()=='image/png')
-        self.assertNotEqual(first_logo['Content-ID'],second_logo['Content-ID'])
         message=BytesParser(policy=app.SMTP).parsebytes(message.as_bytes())
         self.assertEqual(sender,'sender@gmail.com')
         self.assertEqual(app.parseaddr(message['From'])[1],sender)
@@ -908,18 +958,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('DKIM-Signature',message)
         self.assertIn('BRI VISTA',html_body)
         self.assertIn('Verification, Integration &amp; Secure Tracking Application',html_body)
-        inline_logo=next(part for part in message.walk() if part.get_content_type()=='image/png')
-        logo_cid=inline_logo['Content-ID']
-        self.assertRegex(logo_cid,r'^<[^<>\s]+\.bri-vista-logo@gmail\.com>$')
-        self.assertIn('src="cid:'+logo_cid[1:-1]+'"',html_body)
-        related=next(part for part in message.walk() if part.get_content_type()=='multipart/related')
-        self.assertEqual(related.get_param('type'),'text/html')
-        self.assertEqual(related.get_param('start'),related.get_payload()[0]['Content-ID'])
-        self.assertEqual(related.get_payload()[0].get_content_type(),'text/html')
-        self.assertEqual(inline_logo.get_content_type(),'image/png')
-        self.assertEqual(inline_logo.get_content_disposition(),'inline')
-        self.assertIsNone(inline_logo.get_filename())
-        self.assertTrue(inline_logo.get_payload(decode=True).startswith(b'\x89PNG\r\n\x1a\n'))
+        self.assertIn('src="'+app.BASE_URL+'/assets/bri-vista-login-logo.png"',html_body)
+        self.assertNotIn('cid:',html_body)
+        self.assertEqual([part.get_content_type() for part in message.walk()],['multipart/alternative','text/plain','text/html'])
+        self.assertEqual(list(message.iter_attachments()),[])
+        self.assertFalse(any(part.get('Content-ID') or part.get_filename() for part in message.walk()))
         self.assertNotIn('(v1)',row['subject'])
         with patch.dict(os.environ,{'SMTP_HOST':'smtp.gmail.com','SMTP_USER':''}):
             with self.assertRaises(app.AppError):app.build_confirmation_email(row)

@@ -55,7 +55,7 @@ Gunicorn digunakan pada Linux/Unix. Set `DATABASE_PATH` ke disk persisten milik 
 
 1. Masuk dengan akun sendiri dan tambahkan nasabah uji yang Anda kuasai.
 2. Kirim surat uji. Periksa SMTP, tautan HTTPS, dan keputusan nasabah.
-3. Uji review SOL, revisi, tautan lama, dan audit trail.
+3. Uji review AMOL, revisi, tautan lama, dan audit trail.
 4. Restart layanan dan pastikan akun, surat, audit dan antrean email bertahan.
 5. Atur backup SQLite konsisten, pemantauan, batas request 8 MB, rate limit dan akses operasional. Baca batas keamanan di README sebelum menggunakan data nasabah nyata.
 
@@ -70,12 +70,12 @@ Repository memiliki `render.yaml` untuk satu Web Service Python di Singapore, di
 3. Tinjau region, paket server dan disk beserta biaya yang ditampilkan.
 4. Isi seluruh variabel yang diminta dengan `sync: false` langsung di Render. Jangan menaruh rahasia di GitHub atau chat.
 5. Masukkan konfigurasi SMTP milik Anda dan alamat pengirim yang sudah diverifikasi. Default port 587/STARTTLS; jika penyedia menggunakan 465/SSL, ubah `SMTP_PORT` dan `SMTP_TLS` pada service sebelum deploy.
-6. Isi nama, email dan password petugas/SOL pada `BOOTSTRAP_*`. Password minimal 12 karakter; email kedua akun harus berbeda. Akun akan dibuat secara atomik hanya saat database masih kosong. Akun demo tidak dipakai.
+6. Isi nama, email dan password petugas/AMOL pada `BOOTSTRAP_*`. Password minimal 12 karakter; email kedua akun harus berbeda. Akun akan dibuat secara atomik hanya saat database masih kosong. Akun demo tidak dipakai.
 7. Setelah deployment pertama berhasil dan login kedua akun sudah diperiksa, hapus keenam variabel `BOOTSTRAP_PETUGAS_*`/`BOOTSTRAP_SOL_*`, lalu set `BOOTSTRAP_USERS=0`. Jangan menghapus disk. Variabel bootstrap tidak mengubah akun yang sudah tersimpan.
 8. URL email otomatis menggunakan `RENDER_EXTERNAL_URL` yang disediakan Render. Jika menggunakan domain sendiri, atur `PUBLIC_BASE_URL=https://domain-anda` dan akses aplikasi melalui origin yang sama.
-9. Uji email pada alamat uji milik Anda, keputusan nasabah, review SOL dan revisi. Jangan mulai memakai data nasabah nyata sebelum review keamanan dan backup disiapkan.
+9. Uji email pada alamat uji milik Anda, keputusan nasabah, review AMOL dan revisi. Jangan mulai memakai data nasabah nyata sebelum review keamanan dan backup disiapkan.
 
-Untuk Gmail, isi `SMTP_HOST=smtp.gmail.com`, `SMTP_USER` dengan satu alamat Gmail milik SOL, dan `SMTP_PASSWORD` dengan App Password Google. Pengirim otomatis mengikuti `SMTP_USER`; `SMTP_FROM` hanya diperlukan jika ingin mengatur identitas pengirim lain yang telah diizinkan penyedia. Alamat login petugas/SOL berbeda dari konfigurasi email pengirim dan tidak memerlukan kotak masuk untuk login. Alamat dummy seperti `petugas.uji@example.test` dan `sol.uji@example.test` hanya untuk identitas akun uji, bukan penerima email nyata.
+Untuk Gmail, isi `SMTP_HOST=smtp.gmail.com`, `SMTP_USER` dengan satu alamat Gmail milik AMOL, dan `SMTP_PASSWORD` dengan App Password Google. Pengirim otomatis mengikuti `SMTP_USER`; `SMTP_FROM` hanya diperlukan jika ingin mengatur identitas pengirim lain yang telah diizinkan penyedia. Alamat login petugas/AMOL berbeda dari konfigurasi email pengirim dan tidak memerlukan kotak masuk untuk login. Alamat dummy seperti `petugas.uji@example.test` dan `sol.uji@example.test` hanya untuk identitas akun uji, bukan penerima email nyata.
 
 Database dibuat saat runtime karena persistent disk Render tidak tersedia pada build/pre-deploy/one-off job. Dengan demikian tidak perlu menjalankan `server.py init` sebagai build command. Native Python dipilih untuk menghindari kebutuhan pengaturan ownership mount Docker; Dockerfile tetap tersedia untuk host lain. Health check dapat lolos hanya setelah worker berhasil memvalidasi konfigurasi dan akun awal.
 

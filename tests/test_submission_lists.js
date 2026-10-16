@@ -67,7 +67,7 @@ test('Dashboard KPIs and their detail lists exclude all terminal submissions', (
   assert.equal(vm.runInContext("kpiDocuments('review',state.documents,'all').length", context), 2);
 });
 
-test('Refreshing a customer or SOL decision moves a record to history without deleting it', () => {
+test('Refreshing a customer or AMOL decision moves a record to history without deleting it', () => {
   const pending = doc('same-id', 'confirmed', 'pending');
   const approved = {...pending, sol_status: 'approved'};
   context.state.documents = [pending];
@@ -78,7 +78,7 @@ test('Refreshing a customer or SOL decision moves a record to history without de
   assert.equal(context.historyOutcome(context.state.documents[0]).result, 'success');
 });
 
-test('SOL has only approve/reject actions, including unfinished legacy revision requests', () => {
+test('AMOL has only approve/reject actions, including unfinished legacy revision requests', () => {
   context.icon = () => '';
   context.notice = message => message;
   for (const sol of ['pending', 'revision_requested']) {
@@ -121,14 +121,14 @@ test('Rejected reviews use a cross and never a completed approval check', () => 
   const sol = context.renderDocumentProgress(doc('rejected-sol', 'confirmed', 'rejected'));
   const solStep = sol.match(/<li class="status-step rejected"[\s\S]*?<\/li>/)[0];
   assert.ok(solStep.includes('data-icon="close"'));
-  assert.ok(solStep.includes('Review SOL'));
+  assert.ok(solStep.includes('Review AMOL'));
   const approved = context.renderDocumentProgress(doc('done', 'confirmed', 'approved'));
   assert.equal((approved.match(/data-icon="check"/g) || []).length, 3);
   assert.ok(!approved.includes('status-step rejected'));
 });
 
 
-test('Partial two-verifier approval remains in customer review and cannot open SOL actions', () => {
+test('Partial two-verifier approval remains in customer review and cannot open AMOL actions', () => {
   const partial = {...doc('dual-partial', 'pending', 'pending'), verification:{required:2, confirmed:1, verifiers:[{position:1,status:'confirmed'},{position:2,status:'pending'}]}};
   assert.equal(context.customerReviewText(partial, 'Menunggu'), 'Menunggu verifikator lainnya');
   assert.equal(context.kpiReviewStatus('pending', partial), 'pending');

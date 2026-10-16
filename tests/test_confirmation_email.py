@@ -8,7 +8,10 @@ class Links(HTMLParser):
     def __init__(self):
         super().__init__()
         self.hrefs = []
+        self.images = []
     def handle_starttag(self, tag, attrs):
+        if tag == 'img':
+            self.images.append(dict(attrs).get('src'))
         if tag == 'a':
             self.hrefs.append(dict(attrs).get('href'))
 
@@ -24,7 +27,8 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertEqual(expiry_label(self.expires), '14 Okt 2026 pukul 01.15 WIB')
         self.assertIn(self.link, body.splitlines())
         self.assertIn('Rekening tujuan: 000123456789012', body)
-        html = render_confirmation_html(body, 'https://bpip.example.test', 'brand-logo')
+        logo_url = 'https://bpip.example.test/assets/bri-vista-login-logo.png'
+        html = render_confirmation_html(body, 'https://bpip.example.test', logo_url)
         self.assertIn('14 Okt 2026 pukul 01.15 WIB', body)
         self.assertIn('Link verifikasi berlaku selama 24 jam sejak pengajuan dikirim.', body)
         self.assertIn('000123456789012', html)
@@ -32,6 +36,9 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertIn('PT Penerima &lt;Contoh&gt;', html)
         links = Links(); links.feed(html)
         self.assertEqual(links.hrefs, [self.link])
+        self.assertEqual(links.images, [logo_url])
+        self.assertNotIn('cid:', html)
+        self.assertLess(html.index('<img '), html.index('<h1 '))
 
     def test_security_duration_follows_configuration(self):
         body = confirmation_body(self.doc, self.link, self.expires, ttl_hours=12)
@@ -39,6 +46,14 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertIn('Link verifikasi berlaku selama 12 jam sejak pengajuan dikirim.', body)
         self.assertIn('<strong>12 jam</strong>', html)
         self.assertNotIn('24 jam', html)
+
+    def test_destination_bank_in_email_and_legacy_body_without_bank(self):
+        legacy = confirmation_body(self.doc, self.link, self.expires)
+        self.assertNotIn('Bank Rekening Tujuan:', legacy)
+        self.doc['destination_bank'] = 'BRI'
+        body = confirmation_body(self.doc, self.link, self.expires)
+        self.assertIn('Bank Rekening Tujuan: BRI', body)
+        self.assertIn('Bank Rekening Tujuan', render_confirmation_html(body, 'https://bpip.example.test'))
 
     def test_untrusted_content_and_urls_never_become_html_or_links(self):
         body = 'Yth. <script>alert(1)</script>,\n\nhttps://evil.example/#confirm/stolen\n\nhttps://bpip.example.test/#confirm/token\" onclick=\"bad\n\njavascript:alert(1)'

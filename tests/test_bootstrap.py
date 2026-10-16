@@ -18,7 +18,7 @@ class BootstrapTests(unittest.TestCase):
             'BOOTSTRAP_PETUGAS_NAME': 'Petugas Uji',
             'BOOTSTRAP_PETUGAS_PASSWORD': 'MakerPrivate!2026',
             'BOOTSTRAP_SOL_EMAIL': 'checker@example.com',
-            'BOOTSTRAP_SOL_NAME': 'SOL Uji',
+            'BOOTSTRAP_SOL_NAME': 'AMOL Uji',
             'BOOTSTRAP_SOL_PASSWORD': 'CheckerPrivate!2026',
         }
 

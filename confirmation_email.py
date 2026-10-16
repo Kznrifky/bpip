@@ -16,6 +16,7 @@ def expiry_label(expires):
 def confirmation_body(doc, link, expires, ttl_hours=24):
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
     values = {key: ' '.join(str(doc[key] or 'Belum tercatat').splitlines()) for key in ('customer_name', 'id', 'kind', 'destination_account', 'destination_name')}
+    bank_line = ('Bank Rekening Tujuan: ' + str(doc['destination_bank']) + '\n') if 'destination_bank' in doc.keys() and doc['destination_bank'] else ''
     position = doc['person'] if 'person' in doc.keys() else None
     role = ' '.join(str(position or 'Bapak/Ibu').split())
     role = role[:1].upper() + role[1:]
@@ -29,7 +30,7 @@ Nasabah: {values['customer_name']}
 Nominal transaksi: {amount}
 Nomor pengajuan: {values['id']}
 Jenis dokumen: {values['kind']}
-Rekening tujuan: {values['destination_account']}
+{bank_line}Rekening tujuan: {values['destination_account']}
 Nama Rekening Tujuan: {values['destination_name']}
 
 Verifikasi Transaksi:
@@ -52,7 +53,7 @@ Hormat kami,
 """
 
 
-def render_confirmation_html(body, base_url, logo_cid=None):
+def render_confirmation_html(body, base_url, logo_url=None):
     """Recognize current and legacy outbox bodies; never link arbitrary content."""
     escape = lambda value: html.escape(str(value), quote=True)
     link_pattern = re.compile(re.escape(base_url.rstrip('/')) + r'/#confirm/[A-Za-z0-9_-]+')
@@ -68,8 +69,8 @@ def render_confirmation_html(body, base_url, logo_cid=None):
     if not security_points:
         security_points = ['Link verifikasi hanya dapat digunakan satu kali untuk memberikan keputusan.', 'Membuka link verifikasi tidak secara otomatis memberikan persetujuan.', 'Jaga kerahasiaan link verifikasi ini dan jangan membagikannya kepada pihak lain.']
     signature = next((paragraph.split('\n', 1)[1] for paragraph in paragraphs if paragraph.startswith('Hormat kami,\n')), SIGNATURE)
-    branding = (f'<img src="cid:{escape(logo_cid)}" width="252" height="88" alt="BRI VISTA — Verification, Integration &amp; Secure Tracking Application" style="display:block;width:252px;max-width:100%;height:auto;border:0">'
-                if logo_cid else '<strong style="display:block;font-size:26px;line-height:32px;color:#0756bd">BRI VISTA</strong><span style="display:block;font-size:11px;line-height:17px;color:#657895">Verification, Integration &amp; Secure Tracking Application</span>')
+    branding = (f'<img src="{escape(logo_url)}" width="252" height="88" alt="BRI VISTA — Verification, Integration &amp; Secure Tracking Application" style="display:block;width:252px;max-width:100%;height:auto;border:0">'
+                if logo_url else '<strong style="display:block;font-size:26px;line-height:32px;color:#0756bd">BRI VISTA</strong><span style="display:block;font-size:11px;line-height:17px;color:#657895">Verification, Integration &amp; Secure Tracking Application</span>')
     rows = []
     for label, value in sorted(fields, key=lambda field: {'nasabah': 0, 'nominal transaksi': 1}.get(field[0].lower(), 2)):
         if label.lower() == 'status':
