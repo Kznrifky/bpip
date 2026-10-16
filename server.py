@@ -505,9 +505,7 @@ def build_confirmation_email(row):
     message['Message-ID'] = f"<{row['id']}@{sender.rsplit('@',1)[-1]}>"
     message['Auto-Submitted'] = 'auto-generated'
     message.set_content(row['body'])
-    logo = ROOT / 'web/assets/bri-vista-login-logo.png'
-    logo_url = f'{BASE_URL}/assets/bri-vista-login-logo.png' if logo.is_file() else None
-    email_html = render_confirmation_html(row['body'], BASE_URL, logo_url)
+    email_html = render_confirmation_html(row['body'], BASE_URL)
     message.add_alternative(email_html, subtype='html')
     return message, sender
 

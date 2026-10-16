@@ -27,8 +27,7 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertEqual(expiry_label(self.expires), '14 Okt 2026 pukul 01.15 WIB')
         self.assertIn(self.link, body.splitlines())
         self.assertIn('Rekening tujuan: 000123456789012', body)
-        logo_url = 'https://bpip.example.test/assets/bri-vista-login-logo.png'
-        html = render_confirmation_html(body, 'https://bpip.example.test', logo_url)
+        html = render_confirmation_html(body, 'https://bpip.example.test')
         self.assertIn('14 Okt 2026 pukul 01.15 WIB', body)
         self.assertIn('Link verifikasi berlaku selama 24 jam sejak pengajuan dikirim.', body)
         self.assertIn('000123456789012', html)
@@ -36,9 +35,9 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertIn('PT Penerima &lt;Contoh&gt;', html)
         links = Links(); links.feed(html)
         self.assertEqual(links.hrefs, [self.link])
-        self.assertEqual(links.images, [logo_url])
+        self.assertEqual(links.images, [])
         self.assertNotIn('cid:', html)
-        self.assertLess(html.index('<img '), html.index('<h1 '))
+        self.assertLess(html.index('>BRI VISTA</strong>'), html.index('<h1 '))
 
     def test_security_duration_follows_configuration(self):
         body = confirmation_body(self.doc, self.link, self.expires, ttl_hours=12)
