@@ -57,13 +57,18 @@ def timestamp(value):
 
 
 def build_execution_report(doc, version, audit, maker):
-    if doc['sol_status'] != 'approved' or doc['customer_status'] != 'confirmed':
-        raise ReportError('PDF tersedia setelah nasabah dan AMOL menyetujui pengajuan.')
-    audit = [{**entry, 'action': re.sub(r'\bSOL\b', 'AMOL', entry['action']), 'actor': entry['actor'].replace(' (SOL)', ' (AMOL)')} for entry in audit]
+    checked = doc.get('review_flow', 1) >= 2
+    if doc['sol_status'] != 'approved' or doc['customer_status'] != 'confirmed' or (checked and doc.get('checker_status') != 'approved'):
+        raise ReportError('PDF tersedia setelah nasabah, SOL, dan AMOL menyetujui pengajuan.')
+    if not checked:
+        audit = [{**entry, 'action': re.sub(r'\bSOL\b', 'AMOL', entry['action']), 'actor': entry['actor'].replace(' (SOL)', ' (AMOL)')} for entry in audit]
     maker = next((a['actor'] for a in audit if a['action'] == 'Pengajuan dikirim untuk konfirmasi nasabah'), maker)
     approvals = [a for a in audit if a['version'] == doc['version']]
     customer = next((a for a in reversed(approvals) if a['action'] == 'Nasabah menyetujui surat'), None)
     sol = next((a for a in reversed(approvals) if a['action'] == 'AMOL menyetujui pengajuan'), None)
+    checker = next((a for a in reversed(approvals) if a['action'] == 'SOL menyetujui pengajuan'), None) if checked else None
+    if checked and not checker:
+        raise ReportError('Catatan persetujuan SOL belum lengkap.')
     if not customer or not sol:
         raise ReportError('Catatan persetujuan belum lengkap. Hubungi pengelola aplikasi.')
     verifiers = doc.get('verifiers', [])
@@ -184,6 +189,9 @@ def build_execution_report(doc, version, audit, maker):
     for verifier in identities:
         title='Verifikator '+str(verifier['position']) if len(identities)>1 else 'Verifikator'
         approval_content.extend([row([(title,verifier['name'],'person'),('Disetujui',timestamp(verifier['used_at']),'check')]),Spacer(1,6)])
+    if checker:
+        approval_content.extend([row([('SOL (Checker)',checker['actor'],'person'),('Disetujui',timestamp(checker['at']),'check')]),Spacer(1,6)])
+        if checker['notes']: approval_content.extend([para('Catatan SOL: '+checker['notes'],'ReportSmall'),Spacer(1,6)])
     approval_content.extend([row([('AMOL',sol['actor'],'person'),('Disetujui',timestamp(sol['at']),'check')]),Spacer(1,8),para('Sebagai pihak berwenang, verifikator telah memeriksa dan menyetujui surat serta nominal transaksi.','ReportSmall')])
     if sol['notes']: approval_content.extend([Spacer(1,6),para('Catatan AMOL: '+sol['notes'],'ReportSmall')])
     log_rows=[[para(label,'ReportHeader') for label in ('Waktu (WIB)','Pelaku','Aktivitas','Catatan')]]
@@ -192,7 +200,7 @@ def build_execution_report(doc, version, audit, maker):
         log_rows.append([para(timestamp(entry['at']).replace(' ', '\n',1).replace(' WIB',''),'ReportSmall'),para(entry['actor'],'ReportSmall'),para(entry['action'],'ReportSmall'),para(note or '-','ReportSmall')])
     log=Table(log_rows,colWidths=[76,89,143,167],repeatRows=1,hAlign='LEFT',splitInRow=1)
     log.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),pale),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),('LINEBELOW',(0,0),(-1,-1),.4,line)]))
-    story=[para('SURAT KONFIRMASI PELAKSANAAN','ReportTitle'),Spacer(1,5),para(doc['customer_name'],'ReportPanelTitle'),Spacer(1,6),para('Pengajuan telah dikonfirmasi seluruh verifikator dan disetujui AMOL.','ReportSmall'),Spacer(1,16),card('Informasi Pengajuan',[row([('Nomor SI',doc['id'],'file'),('Dibuat pada',timestamp(doc['created']),'calendar'),('Jenis dokumen',doc['kind'],'file')],equal_height=True)]),Spacer(1,14),card('Data Nasabah',overview,'person'),Spacer(1,12),para('Dokumen ini merupakan bukti persetujuan, bukan bukti transaksi telah dilaksanakan.','ReportSmall'),PageBreak(),card('Informasi Transaksi',transaction),Spacer(1,14),card('RIWAYAT PERNYATAAN DAN PERSETUJUAN',approval_content),Spacer(1,14),card('LOG AKTIVITAS',[para('Pembuat pengajuan: '+maker,'ReportSmall'),Spacer(1,8),log])]
+    story=[para('SURAT KONFIRMASI PELAKSANAAN','ReportTitle'),Spacer(1,5),para(doc['customer_name'],'ReportPanelTitle'),Spacer(1,6),para('Pengajuan telah dikonfirmasi seluruh verifikator, diperiksa SOL, dan disetujui AMOL.' if checked else 'Pengajuan telah dikonfirmasi seluruh verifikator dan disetujui AMOL.','ReportSmall'),Spacer(1,16),card('Informasi Pengajuan',[row([('Nomor SI',doc['id'],'file'),('Dibuat pada',timestamp(doc['created']),'calendar'),('Jenis dokumen',doc['kind'],'file')],equal_height=True)]),Spacer(1,14),card('Data Nasabah',overview,'person'),Spacer(1,12),para('Dokumen ini merupakan bukti persetujuan, bukan bukti transaksi telah dilaksanakan.','ReportSmall'),PageBreak(),card('Informasi Transaksi',transaction),Spacer(1,14),card('RIWAYAT PERNYATAAN DAN PERSETUJUAN',approval_content),Spacer(1,14),card('LOG AKTIVITAS',[para('Pembuat pengajuan: '+maker,'ReportSmall'),Spacer(1,8),log])]
     if reader is None:
         story.extend([PageBreak(),para('LAMPIRAN SURAT TRANSAKSI','ReportTitle'),Spacer(1,12),para(version['filename'],'ReportSmall'),Spacer(1,14)])
         image_width,image_height=image_size

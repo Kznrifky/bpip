@@ -68,5 +68,5 @@ class RetiredAccountManagementTests(unittest.TestCase):
         with app.database() as db:
             self.assertEqual(before,[tuple(row) for row in db.execute('SELECT * FROM users')])
         self.assertEqual(boh.call('/documents')[0],200)
-        self.assertEqual(boh.call('/customer-edit-requests')[0],200)
+        self.assertEqual(boh.call('/customer-edit-requests')[0],403)
         self.assertEqual(self.sol.call('/customers')[0],200)

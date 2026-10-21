@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/js/app.js'), 'utf8');
 const context = vm.createContext({state: {documents: []}});
-for (const name of ['finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail', 'positionDateRange']) {
+for (const name of ['needsChecker', 'finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail', 'positionDateRange']) {
   const start = source.indexOf('function ' + name + '(');
   assert.ok(start >= 0, 'Missing ' + name);
   let cursor = source.indexOf('{', start), depth = 0, end;
@@ -245,4 +245,42 @@ test('Date filter stays within the viewport near screen edges and releases deskt
   mobile=true;context.positionDateRange();
   assert.equal(panel.style.left,undefined);assert.equal(panel.style.top,undefined);
   picker.open=false;context.positionDateRange();assert.equal(panel.style.top,undefined);
+});
+
+test('New flow has four single-verifier steps and five two-verifier steps',()=>{
+ context.icon=symbol=>`<svg data-icon="${symbol}"></svg>`;
+ const single={...doc('new','pending','pending'),review_flow:2,checker_status:'pending'};
+ const dual={...single,verification:{required:2,confirmed:0,verifiers:[{position:1,status:'pending'},{position:2,status:'pending'}]}};
+ for(const [record,count] of [[single,4],[dual,5]]){
+  const html=context.renderDocumentProgress(record);
+  assert.equal((html.match(/<li /g)||[]).length,count);
+  assert.ok(html.indexOf('Review SOL')<html.indexOf('Review AMOL'));
+ }
+});
+test('AMOL actions open only after SOL; checker rejection ends active processing',()=>{
+ const pending={...doc('new','confirmed','pending'),review_flow:2,checker_status:'pending'};
+ context.state.user={role:'sol'};
+ assert.ok(!context.renderSolDecision(pending).includes('<button'));
+ context.state.user={role:'checker'};
+ assert.equal((context.renderSolDecision(pending).match(/<button/g)||[]).length,2);
+ const approved={...pending,checker_status:'approved'};
+ assert.ok(!context.renderSolDecision(approved).includes('<button'));
+ context.state.user={role:'sol'};
+ assert.equal((context.renderSolDecision(approved).match(/<button/g)||[]).length,2);
+ const rejected={...pending,checker_status:'rejected'};
+ assert.equal(context.historyOutcome(rejected).reason,'Ditolak SOL');
+ assert.equal(context.activeDocuments([rejected]).length,0);
+ assert.equal(context.finalStatus(pending),'checker');
+ assert.equal(context.finalStatus(approved),'review');
+ const checkerStep=context.renderDocumentProgress(rejected).match(/<li [\s\S]*?<\/li>/g);
+ assert.ok(checkerStep[2].includes('status-step rejected'));
+ assert.ok(checkerStep[3].includes('Tidak dilanjutkan'));
+});
+test('Checker and approver KPI queues advance independently',()=>{
+ const waiting={...doc('wait','confirmed','pending'),review_flow:2,checker_status:'pending'};
+ const checked={...waiting,id:'checked',checker_status:'approved'};
+ assert.equal(context.kpiReviewStatus('checker',waiting),'pending');
+ assert.equal(context.kpiReviewStatus('review',waiting),null);
+ assert.equal(context.kpiReviewStatus('review',checked),'pending');
+ assert.equal(context.kpiReviewStatus('checker',checked),'approved');
 });

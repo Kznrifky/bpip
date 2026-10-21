@@ -166,6 +166,12 @@ def initialize():
         for column, definition in VERIFIER_COLUMNS.items():
             if column not in customer_columns:
                 db.execute(f'ALTER TABLE customers ADD COLUMN {column} {definition}')
+        review_columns = {row['name'] for row in db.execute('PRAGMA table_info(documents)')}
+        for column, definition in {'checker_status': "TEXT NOT NULL DEFAULT 'pending'", 'checker_notes': "TEXT NOT NULL DEFAULT ''", 'checker_by': 'TEXT', 'checker_at': 'TEXT', 'review_flow': 'INTEGER NOT NULL DEFAULT 1'}.items():
+            if column not in review_columns:
+                db.execute(f'ALTER TABLE documents ADD COLUMN {column} {definition}')
+        if 'review_flow' not in review_columns:
+            db.execute("UPDATE documents SET review_flow=2 WHERE sol_status IN ('pending','revision_requested')")
         if 'verifier_config' not in {row['name'] for row in db.execute('PRAGMA table_info(documents)')}:
             db.execute("ALTER TABLE documents ADD COLUMN verifier_config TEXT NOT NULL DEFAULT ''")
         for table in ('documents', 'versions'):
@@ -176,12 +182,40 @@ def initialize():
     os.chmod(DB_PATH, 0o600)
 
 def create_user(email, name, role, password):
-    if role not in ('petugas', 'sol', 'boh') or not 12 <= len(password) <= 500:
-        raise ValueError('Peran harus petugas/sol/boh dan password 12–500 karakter.')
+    if role not in ('petugas', 'sol', 'boh', 'checker') or not 12 <= len(password) <= 500:
+        raise ValueError('Peran harus petugas/sol/boh/checker dan password 12–500 karakter.')
     email = valid_email(email)
     name = text_field({'name': name}, 'name')
     with database(True) as db:
         db.execute('INSERT INTO users(id,email,name,role,password) VALUES(?,?,?,?,?)', (secrets.token_hex(12), email, name, role, password_hash(password)))
+
+def configure_reviewers(checker_email, approver_email):
+    """Explicit terminal-only provisioning; never run automatically on deploy.
+
+    Keep existing passwords, ownership, audit identities and unrelated accounts.
+    Return a generated password only when a new account was created.
+    """
+    checker_email, approver_email = valid_email(checker_email), valid_email(approver_email)
+    require(checker_email != approver_email, 'SOL dan AMOL harus menggunakan akun berbeda.')
+    result = []
+    with database(True) as db:
+        for email, role, label in ((checker_email, 'checker', 'SOL'), (approver_email, 'sol', 'AMOL')):
+            existing = db.execute('SELECT * FROM users WHERE email=? COLLATE NOCASE', (email,)).fetchone()
+            require(existing is None or (existing['role'] in ('sol','checker') and existing['active']), 'Email '+email+' dipakai oleh akun lain atau akun nonaktif. Periksa sebelum melanjutkan.', 409)
+        for email, role, label in ((checker_email, 'checker', 'SOL'), (approver_email, 'sol', 'AMOL')):
+            existing = db.execute('SELECT * FROM users WHERE email=? COLLATE NOCASE', (email,)).fetchone()
+            if existing:
+                if existing['role'] != role:
+                    db.execute('UPDATE users SET role=? WHERE id=?', (role, existing['id']))
+                    db.execute('DELETE FROM sessions WHERE user_id=?', (existing['id'],))
+                    management_audit(db, 'users/'+existing['id'], 'Penyesuaian role menjadi '+label, {'id':'terminal-admin'})
+                result.append({'email':email,'role':label,'created':False})
+            else:
+                user_id, password = secrets.token_hex(12), secrets.token_urlsafe(24)
+                db.execute('INSERT INTO users(id,email,name,role,password) VALUES(?,?,?,?,?)', (user_id,email,label,role,password_hash(password)))
+                management_audit(db, 'users/'+user_id, 'Akun '+label+' dibuat melalui terminal', {'id':'terminal-admin'})
+                result.append({'email':email,'role':label,'created':True,'initial_password':password})
+    return result
 
 def bootstrap_users():
     """Create both initial users atomically, only on an empty persistent DB.
@@ -199,7 +233,7 @@ def bootstrap_users():
             name = text_field({'name': os.getenv(prefix + '_NAME', '')}, 'name')
             password = os.getenv(prefix + '_PASSWORD', '')
             require(12 <= len(password) <= 500, f'{prefix}_PASSWORD harus 12–500 karakter.')
-            require(not PRODUCTION or password not in ('PetugasDemo!2026', 'SolDemo!2026'), 'Password demo tidak boleh dipakai saat production.')
+            require(not PRODUCTION or password not in ('PetugasDemo!2026', 'SolDemo!2026', 'SolCheckerDemo!2026', 'AmolDemo!2026'), 'Password demo tidak boleh dipakai saat production.')
             values.append((secrets.token_hex(12), email, name, role, password_hash(password)))
         require(values[0][1] != values[1][1], 'Email petugas dan AMOL harus berbeda.')
         db.executemany('INSERT INTO users(id,email,name,role,password) VALUES(?,?,?,?,?)', values)
@@ -317,20 +351,22 @@ def customer_edit_payload(row):
     return result
 
 def request_customer_edit(db, customer, proposed, reason, user):
-    require(not db.execute("SELECT 1 FROM customer_edit_requests WHERE cif=? AND status='pending'", (customer['cif'],)).fetchone(), 'Masih ada pembaruan nasabah yang menunggu persetujuan BOH.', 409)
+    require(not db.execute("SELECT 1 FROM customer_edit_requests WHERE cif=? AND status='pending'", (customer['cif'],)).fetchone(), 'Masih ada pembaruan nasabah yang menunggu persetujuan AMOL.', 409)
     before = customer_snapshot(customer)
     after = {**before, **proposed}
     require(any(before[key] != after[key] for key in CUSTOMER_FIELDS), 'Tidak ada perubahan data nasabah.')
     request_id = secrets.token_hex(12)
     db.execute('INSERT INTO customer_edit_requests(id,cif,old_data,new_data,reason,requested_by,requested_name,created) VALUES(?,?,?,?,?,?,?,?)', (request_id, customer['cif'], json.dumps(before), json.dumps(after), reason, user['id'], user['name'], now()))
-    management_audit(db, 'customers/' + customer['cif'], 'Pembaruan diajukan ke BOH: ' + request_id, user)
+    management_audit(db, 'customers/' + customer['cif'], 'SOL mengajukan pembaruan ke AMOL: ' + request_id, user)
     return request_id
 
 def cancel_customer_edits(db, cif, user):
     db.execute("UPDATE customer_edit_requests SET status='cancelled',reviewed_by=?,reviewed_name=?,review_notes='Nasabah dihapus oleh AMOL.',reviewed_at=? WHERE cif=? AND status='pending'", (user['id'], user['name'], now(), cif))
 
-def displayed_audit(row):
+def displayed_audit(row, review_flow=1):
     entry = dict(row)
+    if review_flow >= 2:
+        return entry
     entry['action'] = re.sub(r'\bSOL\b', 'AMOL', entry['action'])
     entry['actor'] = entry['actor'].replace(' (SOL)', ' (AMOL)')
     return entry
@@ -455,7 +491,7 @@ def document_summary(db, row):
 def owned_document(db, doc_id, user, shared_read=False):
     doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
     require(doc is not None, 'Pengajuan tidak ditemukan.', 404)
-    require(user['role'] == 'sol' or doc['maker'] == user['id'] or (shared_read and user['role'] in ('petugas', 'boh')), 'Anda tidak memiliki akses ke pengajuan ini.', 403)
+    require(user['role'] in ('sol','checker') or doc['maker'] == user['id'] or (shared_read and user['role'] in ('petugas', 'boh')), 'Anda tidak memiliki akses ke pengajuan ini.', 403)
     require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc_id,)).fetchone(), 'Pengajuan telah dihapus dari daftar. AMOL dapat memulihkannya.', 404)
     return doc
 
@@ -608,7 +644,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
         raw = cookie.get('bpip_session')
-        row = db.execute("SELECT u.*,s.csrf,s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>? AND u.active=1 AND u.role IN ('petugas','sol','boh')", (digest(raw.value) if raw else '', time.time())).fetchone()
+        row = db.execute("SELECT u.*,s.csrf,s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>? AND u.active=1 AND u.role IN ('petugas','sol','boh','checker')", (digest(raw.value) if raw else '', time.time())).fetchone()
         require(row is not None, 'Sesi berakhir. Silakan masuk kembali.', 401)
         if mutate:
             require(hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), row['csrf']), 'Token sesi tidak sesuai. Muat ulang halaman.', 403)
@@ -643,9 +679,10 @@ class Handler(BaseHTTPRequestHandler):
             with database() as db:
                 user = self.session(db)
                 require(not re.match(r'^/api/(?:officers|officer-account-requests|officer-change-requests)(?:/|$)', path), 'Fitur pengelolaan akun tidak tersedia.', 404)
-                require(user['role'] != 'boh' or (path in ('/api/documents', '/api/customer-edit-requests') or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file)?', path)), 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah.', 403)
+                require(user['role'] != 'checker' or (path in ('/api/documents', '/api/customers', '/api/customer-edit-requests') or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file|/execution-pdf)?', path)), 'SOL hanya dapat memeriksa pengajuan dan mengajukan perubahan data nasabah.', 403)
+                require(user['role'] != 'boh' or (path == '/api/documents' or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file)?', path)), 'BOH hanya dapat melihat KPI, tracking, detail surat, dan history pengajuan.', 403)
                 if path == '/api/customer-edit-requests':
-                    require(user['role'] in ('sol', 'boh'), 'Hanya AMOL dan BOH yang dapat melihat pembaruan nasabah.', 403)
+                    require(user['role'] in ('sol', 'checker'), 'Hanya SOL dan AMOL yang dapat melihat pembaruan nasabah.', 403)
                     return self.respond({'requests': [customer_edit_payload(row) for row in db.execute("SELECT * FROM customer_edit_requests ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END, created DESC")]})
                 if path == '/api/customers':
                     return self.respond({'customers': [dict(r) for r in db.execute('SELECT * FROM customers WHERE NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif) ORDER BY name')], 'archived_count': db.execute('SELECT COUNT(*) FROM archived_customers').fetchone()[0] if user['role']=='sol' else 0})
@@ -654,7 +691,7 @@ class Handler(BaseHTTPRequestHandler):
                     rows = db.execute('SELECT * FROM documents WHERE '+visible+' ORDER BY updated DESC')
                     summaries = [document_summary(db, r) for r in rows]
                     if user['role']=='boh':
-                        summaries = [{k:d[k] for k in ('id','cif','customer_name','maker_name','kind','nominal','version','customer_status','sol_status','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None, 'verification': {key:d['verification'][key] for key in ('required','confirmed')}} for d in summaries]
+                        summaries = [{k:d[k] for k in ('id','cif','customer_name','maker_name','kind','nominal','version','customer_status','sol_status','checker_status','checker_notes','checker_by','checker_at','review_flow','updated','created')} | {'mail': {'status':d['mail']['status']} if d['mail'] else None, 'verification': {key:d['verification'][key] for key in ('required','confirmed')}} for d in summaries]
                     return self.respond({'documents': summaries, 'archived_count': db.execute('SELECT COUNT(*) FROM archived_documents').fetchone()[0] if user['role']=='sol' else 0})
                 if path in ('/api/customers/archived','/api/documents/archived'):
                     require(user['role']=='sol', 'Hanya AMOL yang dapat mengelola arsip.', 403)
@@ -666,9 +703,9 @@ class Handler(BaseHTTPRequestHandler):
                 report = re.fullmatch(r'/api/documents/([^/]+)/execution-pdf', path)
                 if report:
                     doc = owned_document(db, report[1], user, shared_read=True)
-                    require(doc['sol_status']=='approved' and doc['customer_status']=='confirmed', 'PDF tersedia setelah nasabah dan AMOL menyetujui pengajuan.', 409)
+                    require(doc['sol_status']=='approved' and doc['customer_status']=='confirmed' and (doc['review_flow'] < 2 or doc['checker_status']=='approved'), 'PDF tersedia setelah nasabah, SOL, dan AMOL menyetujui pengajuan.', 409)
                     version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'],doc['version'])).fetchone()
-                    audit = [displayed_audit(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id', (doc['id'],))]
+                    audit = [displayed_audit(r, doc['review_flow']) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id', (doc['id'],))]
                     maker = db.execute('SELECT name FROM users WHERE id=?', (doc['maker'],)).fetchone()
                     require(EXECUTION_PDF_LOCK.acquire(blocking=False), 'Dokumen pelaksanaan lain sedang diproses. Coba unduh kembali sebentar lagi.', 503)
                     try:
@@ -708,7 +745,7 @@ class Handler(BaseHTTPRequestHandler):
                     result = document_summary(db, doc)
                     customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
                     result['phone'] = customer['phone'] if customer else ''
-                    result['audit'] = [displayed_audit(r) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id DESC', (doc['id'],))]
+                    result['audit'] = [displayed_audit(r, doc['review_flow']) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id DESC', (doc['id'],))]
                     result['versions'] = [dict(r) for r in db.execute('SELECT version,filename,sha256,nominal,created,destination_account,destination_name,destination_bank FROM versions WHERE doc_id=? ORDER BY version DESC', (doc['id'],))]
                     return self.respond({'document': result})
                 if path == '/api/outbox' and MAIL_MODE == 'console' and not PRODUCTION:
@@ -759,7 +796,7 @@ class Handler(BaseHTTPRequestHandler):
                 user = db.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
                 dummy = '0' * 32 + ':' + '0' * 64
                 ok = password_matches(password, user['password'] if user else dummy)
-                if not user or not ok or not user['active'] or user['role'] not in ('petugas', 'sol', 'boh'):
+                if not user or not ok or not user['active'] or user['role'] not in ('petugas', 'sol', 'boh', 'checker'):
                     db.execute('INSERT INTO login_attempts VALUES(?,?,?)', (ip, email, time.time()))
                     db.commit()
                     raise AppError(401, 'Email atau password tidak sesuai.')
@@ -816,12 +853,14 @@ class Handler(BaseHTTPRequestHandler):
                 db.commit()
                 return self.respond({'ok': True})
             require(not re.match(r'^/api/(?:officers|officer-account-requests|officer-change-requests)(?:/|$)', path), 'Fitur pengelolaan akun tidak tersedia.', 404)
+            require(user['role'] != 'boh', 'BOH hanya dapat melihat KPI, tracking, detail surat, dan history pengajuan.', 403)
             customer_review = re.fullmatch(r'/api/customer-edit-requests/([0-9a-f]{24})/review', path)
             if customer_review:
-                require(user['role'] == 'boh', 'Hanya BOH yang dapat memutuskan pembaruan nasabah.', 403)
+                require(user['role'] == 'sol', 'Hanya AMOL yang dapat memutuskan pembaruan nasabah.', 403)
                 request = db.execute('SELECT * FROM customer_edit_requests WHERE id=?', (customer_review[1],)).fetchone()
                 require(request is not None, 'Pembaruan nasabah tidak ditemukan.', 404)
                 require(request['status'] == 'pending', 'Pembaruan ini sudah diputuskan.', 409)
+                require(request['requested_by'] != user['id'], 'Pengaju tidak dapat menyetujui atau menolak permintaannya sendiri. Gunakan akun AMOL yang berbeda.', 403)
                 decision = data.get('decision')
                 require(decision in ('approved', 'rejected'), 'Keputusan tidak valid.')
                 notes = text_field(data, 'notes', 1500, decision == 'rejected')
@@ -829,16 +868,16 @@ class Handler(BaseHTTPRequestHandler):
                     customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (request['cif'],)).fetchone()
                     require(customer is not None, 'Nasabah sudah dihapus. Pembaruan tidak dapat disetujui.', 409)
                     before, after = normalized_customer_snapshot(json.loads(request['old_data'])), normalized_customer_snapshot(json.loads(request['new_data']))
-                    require(customer_snapshot(customer) == before, 'Data nasabah sudah berubah. Tolak permintaan ini dan minta AMOL mengajukan pembaruan baru.', 409)
+                    require(customer_snapshot(customer) == before, 'Data nasabah sudah berubah. Tolak permintaan ini dan minta SOL mengajukan pembaruan baru.', 409)
                     db.execute('UPDATE customers SET '+','.join(key+'=?' for key in CUSTOMER_FIELDS)+',revision=revision+1 WHERE cif=?', (*[after[key] for key in CUSTOMER_FIELDS], request['cif']))
                 db.execute('UPDATE customer_edit_requests SET status=?,reviewed_by=?,reviewed_name=?,review_notes=?,reviewed_at=? WHERE id=?', (decision, user['id'], user['name'], notes, now(), request['id']))
-                management_audit(db, 'customers/' + request['cif'], ('BOH menyetujui' if decision == 'approved' else 'BOH menolak') + ' pembaruan: ' + request['id'], user)
+                management_audit(db, 'customers/' + request['cif'], ('AMOL menyetujui' if decision == 'approved' else 'AMOL menolak') + ' pembaruan: ' + request['id'], user)
                 db.commit()
                 return self.respond({'ok': True})
-            require(user['role']!='boh', 'BOH hanya dapat memantau pengajuan dan menyetujui pembaruan nasabah.', 403)
+            require(user['role'] != 'checker' or bool(re.fullmatch(r'/api/documents/[^/]+/checker-review|/api/customers/[0-9]{3,30}/(?:edit-requests|phone)', path)), 'SOL hanya dapat memeriksa pengajuan dan mengajukan perubahan data nasabah.', 403)
             customer_edit = re.fullmatch(r'/api/customers/([0-9]{3,30})/edit-requests', path)
             if customer_edit:
-                require(user['role'] == 'sol', 'Hanya AMOL yang dapat mengajukan pembaruan nasabah.', 403)
+                require(user['role'] == 'checker', 'Hanya SOL yang dapat mengajukan pembaruan nasabah.', 403)
                 customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (customer_edit[1],)).fetchone()
                 require(customer is not None, 'Nasabah tidak ditemukan.', 404)
                 require(type(data.get('revision')) is int and data['revision'] == customer['revision'], 'Data nasabah sudah berubah. Muat ulang sebelum mengedit.', 409)
@@ -938,7 +977,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({'ok':True})
             phone_update = re.fullmatch(r'/api/customers/([0-9]{3,30})/phone', path)
             if phone_update:
-                require(user['role']=='sol', 'Hanya AMOL yang dapat mengubah data nasabah.', 403)
+                require(user['role']=='checker', 'Hanya SOL yang dapat mengajukan perubahan nomor HP nasabah.', 403)
                 cif = phone_update[1]
                 customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers WHERE cif=customers.cif)', (cif,)).fetchone()
                 require(customer is not None, 'Nasabah tidak ditemukan.', 404)
@@ -969,6 +1008,7 @@ class Handler(BaseHTTPRequestHandler):
                 stamp = now()
                 values = (doc_id, customer['cif'], customer['name'], customer['account'], customer['person'], customer['email'], kind, nominal, description, user['id'], 1, 'pending', 'pending', '', stamp, stamp, destination_account, destination_name, destination_bank)
                 db.execute('INSERT INTO documents(id,cif,customer_name,account,person,email,kind,nominal,description,maker,version,customer_status,sol_status,sol_notes,created,updated,destination_account,destination_name,destination_bank) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
+                db.execute('UPDATE documents SET review_flow=2 WHERE id=?', (doc_id,))
                 if customer['verification_count'] == 2:
                     config = [{'name': customer['verifier_name'], 'person': customer['person'], 'email': customer['email'], 'phone': customer['phone']}, {'name': customer['second_name'], 'person': customer['second_person'], 'email': customer['second_email'], 'phone': customer['second_phone']}]
                     db.execute('UPDATE documents SET verifier_config=? WHERE id=?', (json.dumps(config), doc_id))
@@ -976,11 +1016,23 @@ class Handler(BaseHTTPRequestHandler):
                 preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
                 db.commit()
                 return self.respond({'id': doc_id, 'whatsapp': preview}, 201)
-            match = re.fullmatch(r'/api/documents/([^/]+)/(review|revise|resend|send-confirmation|cancel|archive)', path)
+            match = re.fullmatch(r'/api/documents/([^/]+)/(checker-review|review|revise|resend|send-confirmation|cancel|archive)', path)
             require(match is not None, 'Endpoint tidak ditemukan.', 404)
             doc = owned_document(db, match[1], user)
             operation = match[2]
-            if operation == 'send-confirmation':
+            if operation == 'checker-review':
+                require(user['role'] == 'checker', 'Hanya SOL yang dapat memutuskan pemeriksaan.', 403)
+                require(doc['review_flow'] >= 2, 'Pengajuan ini menggunakan alur sebelumnya.', 409)
+                require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
+                require(doc['customer_status'] == 'confirmed', 'Tunggu persetujuan seluruh verifikator nasabah.', 409)
+                require(doc['checker_status'] == 'pending' and doc['sol_status'] in ('pending','revision_requested'), 'Pemeriksaan SOL sudah diputuskan.', 409)
+                require(user['id'] != doc['maker'], 'Pembuat tidak dapat memeriksa pengajuannya sendiri.', 403)
+                decision = data.get('decision')
+                require(decision in ('approved','rejected'), 'SOL hanya dapat menyetujui atau menolak pengajuan.')
+                notes = text_field(data, 'notes', 1500, decision == 'rejected')
+                db.execute('UPDATE documents SET checker_status=?,checker_notes=?,checker_by=?,checker_at=?,updated=? WHERE id=?', (decision, notes, user['id'], now(), now(), doc['id']))
+                add_audit(db, doc, 'SOL ' + ('menyetujui' if decision == 'approved' else 'menolak') + ' pengajuan', user['name']+' (SOL)', notes, ip, agent)
+            elif operation == 'send-confirmation':
                 require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat mengirim konfirmasi.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
                 preview = send_current_confirmation(db, doc, data.get('channel'), user['name'], ip, agent)
@@ -997,6 +1049,7 @@ class Handler(BaseHTTPRequestHandler):
             elif operation == 'review':
                 require(user['role'] == 'sol', 'Hanya AMOL yang dapat memutuskan pengajuan.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
+                require(doc['review_flow'] < 2 or (doc['checker_status'] == 'approved' and doc['checker_by'] != user['id']), 'Tunggu persetujuan SOL sebelum review AMOL. Pemeriksa dan pemberi persetujuan harus berbeda.', 409)
                 require(doc['customer_status'] in ('confirmed', 'rejected'), 'Tunggu respons nasabah sebelum melakukan review.', 409)
                 require(doc['sol_status'] in ('pending', 'revision_requested'), 'Pengajuan ini sudah direview.', 409)
                 decision = data.get('decision')
@@ -1031,6 +1084,8 @@ def seed_demo():
             return
     create_user('petugas@bpip.local', 'Rina Wulandari', 'petugas', 'PetugasDemo!2026')
     create_user('sol@bpip.local', 'Bambang Haryanto', 'sol', 'SolDemo!2026')
+    create_user('sol@example.test', 'SOL', 'checker', 'SolCheckerDemo!2026')
+    create_user('amol@example.test', 'AMOL', 'sol', 'AmolDemo!2026')
     with database(True) as db:
         db.executemany('INSERT INTO customers(cif,name,account,person,email) VALUES(?,?,?,?,?)', [
             ('1234567', 'PT Maju Bersama', '001234567890', 'Budi Santoso', 'budi@example.com'),
@@ -1050,16 +1105,22 @@ def validate_config():
         require(parsed.scheme == 'https' and MAIL_MODE == 'smtp', 'Production wajib HTTPS dan SMTP.')
         with database() as db:
             for user in db.execute('SELECT password FROM users'):
-                require(not any(password_matches(p, user['password']) for p in ('PetugasDemo!2026', 'SolDemo!2026')), 'Ganti seluruh password demo sebelum production.')
+                require(not any(password_matches(p, user['password']) for p in ('PetugasDemo!2026', 'SolDemo!2026', 'SolCheckerDemo!2026', 'AmolDemo!2026')), 'Ganti seluruh password demo sebelum production.')
 
 def main():
     global DEMO
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', nargs='?', choices=('serve', 'init', 'create-user'), default='serve')
-    parser.add_argument('--role', choices=('petugas', 'sol', 'boh'), help='Peran untuk perintah create-user.')
+    parser.add_argument('command', nargs='?', choices=('serve', 'init', 'create-user', 'configure-reviewers'), default='serve')
+    parser.add_argument('--role', choices=('petugas', 'sol', 'boh', 'checker'), help='Peran untuk perintah create-user.')
+    parser.add_argument('--checker-email', help='Email akun SOL untuk configure-reviewers.')
+    parser.add_argument('--approver-email', help='Email akun AMOL untuk configure-reviewers.')
     parser.add_argument('--demo', action='store_true', help='Akun demo untuk pengujian lokal, tanpa email nyata.')
     args = parser.parse_args()
     initialize()
+    if args.command == 'configure-reviewers':
+        require(args.checker_email and args.approver_email, 'Isi --checker-email dan --approver-email.')
+        print(json.dumps(configure_reviewers(args.checker_email, args.approver_email), ensure_ascii=False))
+        return
     if args.command == 'create-user':
         require(args.role is not None, 'Pilih --role untuk membuat akun awal.')
         create_user(input('Email: ').strip(), input('Nama: ').strip(), args.role, getpass.getpass('Password (min. 12 karakter): '))

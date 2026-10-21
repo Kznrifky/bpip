@@ -80,7 +80,7 @@ Password dapat diganti di menu Pengaturan. Sesi lain dicabut setelah perubahan p
 
 ### Role dan pengelolaan akun
 
-Aplikasi menggunakan role Officer (`petugas`), AMOL (`sol`), dan BOH (`boh`). Role IT dan fitur pengelolaan akun melalui web sudah dihapus, termasuk menu persetujuan akun di BOH. Endpoint pengelolaan akun lama tidak dapat digunakan lagi.
+Aplikasi menggunakan role Officer (`petugas`), SOL checker (`checker`), AMOL (`sol`, kode internal lama), dan BOH (`boh`). Role IT dan fitur pengelolaan akun melalui web sudah dihapus, termasuk menu persetujuan akun di BOH. Endpoint pengelolaan akun lama tidak dapat digunakan lagi.
 
 Akun IT lama dinonaktifkan dan sesinya dicabut saat startup. Identitas akun serta riwayat pengajuan dan audit lama tetap tersimpan; akun Officer, AMOL, dan BOH tidak diubah. Pengajuan akun yang dahulu menunggu persetujuan tidak diproses otomatis.
 
@@ -91,6 +91,24 @@ python3 server.py create-user --role petugas
 ```
 
 Gunakan `--role sol` untuk AMOL atau `--role boh` untuk BOH. Perintah meminta email, nama, dan kata sandi yang tidak ditampilkan saat diketik. Perintah tidak mengubah akun yang sudah ada; pastikan database yang dituju sebelum menjalankannya.
+
+### Pemeriksaan SOL sebelum approval AMOL
+
+Pengajuan baru mengikuti Officer → Verifikator Nasabah (1 atau 2 orang) → SOL checker → AMOL. Seluruh verifikator harus menyetujui sebelum SOL bisa memutuskan. AMOL baru dapat menyetujui atau menolak setelah SOL menyetujui. Penolakan pada salah satu tahap menghentikan pengajuan; alasan wajib diisi saat menolak. Checker tidak memiliki fitur Data Nasabah, Update Data, pengajuan surat, atau penghapusan. Seluruh fitur administratif AMOL sebelumnya tetap berada pada role internal `sol`.
+
+Startup menambahkan status pemeriksaan dan menaikkan pengajuan lama yang masih aktif ke alur baru. Surat yang sudah selesai tetap menggunakan riwayat alur sebelumnya; keputusan lama tidak diubah. PDF untuk alur baru wajib memuat persetujuan nasabah, SOL, dan AMOL dengan pelaku serta waktunya masing-masing.
+
+Siapkan akun checker melalui `python3 server.py create-user --role checker`, dan akun AMOL melalui `--role sol`. Saat memindahkan akun lama, pastikan `sol@example.test` menjadi `checker` dan `amol@example.test` menjadi `sol`; cabut sesi akun yang berganti role. Jangan mengubah role seluruh akun `sol` secara massal karena kode internal itu tetap berarti AMOL.
+
+Untuk penyiapan dua akun yang telah dikonfirmasi pemilik aplikasi, administrator dapat menjalankan satu kali melalui terminal pada database tujuan:
+
+```sh
+python3 server.py configure-reviewers --checker-email sol@example.test --approver-email amol@example.test
+```
+
+Perintah ini **tidak dijalankan otomatis saat deploy**. Akun yang sudah ada mempertahankan ID dan kata sandinya; sesi dicabut jika rolenya berubah. Akun baru memperoleh kata sandi acak yang ditampilkan sekali pada hasil terminal. Menjalankan ulang tidak mereset kata sandi. Email Officer, BOH, atau akun nonaktif tidak ditimpa. Simpan keluaran kata sandi di tempat aman dan jangan masukkan ke Git.
+
+Mode demo lokal menyediakan `sol@example.test` / `SolCheckerDemo!2026` dan `amol@example.test` / `AmolDemo!2026`. Kredensial demo tidak dibuat otomatis dalam produksi dan ditolak oleh pemeriksaan konfigurasi produksi.
 
 ## Hosting dan batas operasional
 
@@ -127,7 +145,7 @@ Pencarian nama nasabah atau CIF tersedia pada tabel Data nasabah (AMOL) dan form
 
 AMOL menghapus nasabah/pengajuan ke arsip dengan password akun yang sedang login. Tombol Pulihkan membuka daftar arsip untuk pemulihan per data. Hapus permanen hanya tersedia di arsip, memerlukan password AMOL serta CIF/ID yang diketik ulang. Penghapusan master nasabah mempertahankan snapshot surat dan pengajuan lama. Penghapusan permanen pengajuan menghapus dokumen, semua file versinya, dan antrean email; catatan audit tetap disimpan. Tautan lama tidak diaktifkan kembali saat pemulihan.
 
-Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun BOH melalui AMOL sudah dinonaktifkan. BOH dapat membaca ringkasan dashboard, detail, surat, dan audit semua pengajuan, memutuskan pembaruan data nasabah dari AMOL, dan mengelola password akun sendiri. API BOH tetap menolak akses daftar master nasabah, PDF pelaksanaan, email, pembuatan transaksi, dan tindakan operasional AMOL. Data nasabah lama dan usulan perubahan tersedia hanya pada daftar persetujuan nasabah bagi AMOL dan BOH.
+Akun BOH yang sudah tersedia dapat login melalui halaman masuk. Pembuatan akun BOH melalui AMOL sudah dinonaktifkan. Navigasi BOH hanya menampilkan **Dashboard** dan **History**. BOH dapat melihat KPI, tracking seluruh pengajuan, detail, surat asli, versi surat, dan log aktivitas. BOH tidak dapat memberi persetujuan atau penolakan, mengubah data, membuat atau menghapus pengajuan, maupun memproses pembaruan nasabah. Pembatasan diterapkan pada API, termasuk endpoint persetujuan pembaruan nasabah lama. Akses master nasabah, PDF pelaksanaan, dan email tetap ditolak. Penggantian kata sandi akun sendiri dan logout tetap tersedia melalui API sesi.
 
 ### Pengiriman email dan Inbox
 
@@ -139,14 +157,14 @@ Buka detail pengajuan yang telah disetujui nasabah dan AMOL, lalu pilih **Unduh 
 
 Surat ini merupakan bukti selesainya alur persetujuan, bukan bukti eksekusi transaksi atau tanda tangan digital tersertifikasi. Tidak ada penanda versi yang ditampilkan; snapshot revisi tetap disimpan secara internal.
 
-### Edit data nasabah dengan persetujuan BOH
+### Perubahan data nasabah: SOL mengajukan, AMOL menyetujui
 
-Saat mode Edit aktif, tombol atas menjadi **Batal — Edit — Tambah nasabah**. Saat mode Hapus aktif, tombol menjadi **Batal — Hapus — Tambah nasabah**. Memilih nasabah dalam mode Hapus langsung membuka konfirmasi dan kolom password AMOL; data belum dihapus sebelum konfirmasi dikirim.
+SOL memilih **Data Nasabah → Edit**, memilih nasabah, mengubah data, lalu mengisi alasan dan memilih **Ajukan ke AMOL**. CIF tidak dapat diubah. SOL dapat membaca master nasabah dan riwayat perubahan, tetapi tidak dapat menambah atau menghapus nasabah. Fitur tambah dan hapus nasabah yang sudah ada tetap tersedia untuk AMOL.
 
-AMOL memilih **Data Nasabah → Edit**, lalu memilih nasabah untuk langsung membuka formulir. AMOL mengubah nama, nomor rekening, jabatan, email, atau nomor HP, lalu mengisi alasan dan memilih **Ajukan ke BOH**. CIF tetap menjadi identitas nasabah. Usulan masuk ke menu **Update Data** pada AMOL dan BOH; jumlah yang menunggu ditampilkan pada navigasi dan diperbarui otomatis.
+Menu **Update Data** tersedia untuk SOL dan AMOL. AMOL membandingkan data sebelumnya dan usulan, lalu memilih **Setujui perubahan** atau **Tolak**. Penolakan wajib disertai alasan. SOL, Officer, dan BOH tidak dapat memutuskan permintaan perubahan. Akun pengaju tidak dapat menyetujui atau menolak permintaannya sendiri, termasuk permintaan lama; AMOL yang berbeda harus menanganinya. Identitas pengaju dan pemeriksa tetap disimpan.
 
-BOH memilih **Periksa** untuk membandingkan data sebelumnya dan usulan AMOL. **Setujui perubahan** memperbarui master nasabah secara atomik; **Tolak** wajib disertai catatan dan mempertahankan data lama. Pemohon, alasan, data sebelum/sesudah, keputusan, catatan, dan waktu tersimpan dalam riwayat. Satu nasabah hanya memiliki satu usulan yang menunggu persetujuan. Data yang berubah sejak pengajuan mencegah persetujuan usulan lama; penghapusan nasabah membatalkan usulan yang masih menunggu.
+Data nasabah diperbarui secara atomik setelah persetujuan AMOL. Satu nasabah hanya dapat memiliki satu permintaan yang menunggu. Revisi master dan snapshot dibandingkan untuk mencegah persetujuan data usang; penghapusan nasabah membatalkan permintaan yang masih menunggu. Pengajuan transaksi yang sudah dibuat tetap menggunakan snapshot data nasabah sebelumnya. Pengajuan baru setelah persetujuan menggunakan data yang telah diperbarui. Perubahan nomor HP mengikuti persetujuan AMOL yang sama.
 
-Pengajuan transaksi yang sudah dibuat tetap menggunakan snapshot data nasabah sebelumnya. Pengajuan baru setelah persetujuan menggunakan data yang telah diperbarui. Endpoint perubahan nomor HP juga masuk antrean BOH dan tidak memperbarui master secara langsung. Startup menambahkan tabel usulan dan nomor revisi master tanpa menghapus data lama. Fitur ini menggunakan akun BOH yang sudah tersedia; tidak membuat atau mengubah akun produksi.
+Permintaan dan audit lama tetap tersimpan tanpa persetujuan otomatis atau penggantian identitas pengaju. BOH hanya memiliki menu Dashboard dan History, tanpa akses perubahan data nasabah atau approval. Perubahan role dan akun produksi tidak dijalankan otomatis.
 
 Pengiriman konfirmasi dicatat per link: Email dan WhatsApp yang sudah dipilih tidak dapat dipilih lagi untuk link yang sama, termasuk setelah halaman dimuat ulang. Memilih Keduanya mengunci kedua pilihan setelah diproses; WhatsApp tetap dikirim manual dari pratinjau, sehingga status pilihan bukan laporan pengiriman dari WhatsApp. Kanal yang belum dipilih dapat menggunakan link yang masih aktif tanpa membuat versi baru. Kirim ulang menerbitkan link baru setelah 24 jam atau ketika link lama kedaluwarsa.

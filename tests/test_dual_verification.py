@@ -124,14 +124,14 @@ class DualVerificationTests(unittest.TestCase):
         self.assertEqual(self.detail(doc)['verification']['confirmed'], 0)
         self.assertEqual(self.customer.call('/documents/'+doc)[0], 401)
 
-    def test_customer_change_still_requires_boh_and_does_not_change_existing_documents(self):
-        boh = self.boh_client(); original = self.create()
+    def test_customer_change_still_requires_amol_and_does_not_change_existing_documents(self):
+        reviewer = self.sol; original = self.create()
         payload = self.customer_edit(verification_count=2, verifier_name='Budi', second_name='Dewi', second_person='Komisaris', second_email='dewi@example.test', second_phone='081234567891')
-        status, result, _ = self.sol.call('/customers/1234567/edit-requests', payload)
+        status, result, _ = self.checker.call('/customers/1234567/edit-requests', payload)
         self.assertEqual(status, 201, result)
         self.assertEqual(self.detail(original)['verification']['required'], 1)
         self.assertEqual(next(c for c in self.maker.call('/customers')[1]['customers'] if c['cif']=='1234567')['verification_count'], 1)
-        self.assertEqual(boh.call('/customer-edit-requests/'+result['id']+'/review', {'decision':'approved'})[0], 200)
+        self.assertEqual(reviewer.call('/customer-edit-requests/'+result['id']+'/review', {'decision':'approved'})[0], 200)
         fresh = self.create()
         self.assertEqual(self.detail(fresh)['verification']['required'], 2)
         self.assertEqual(self.detail(original)['verification']['required'], 1)

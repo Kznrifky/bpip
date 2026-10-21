@@ -953,3 +953,8 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
 @media (max-width: 520px) {
  .portal-transaction-data:not(.without-bank) > .detail-data-row:first-child { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Separate the SOL checker and the final AMOL approval. */
+.stats.stats-review-flow{grid-template-columns:repeat(4,minmax(0,1fr))}.status-flow.status-flow-4{grid-template-columns:repeat(4,minmax(0,1fr))}.status-flow.status-flow-5{grid-template-columns:repeat(5,minmax(0,1fr))}.review-table{min-width:960px}.review-table th:nth-child(1){width:27%}.review-table th:nth-child(2){width:20%}.review-table th:nth-child(3),.review-table th:nth-child(4),.review-table th:nth-child(5){width:17.66%}.review-table td:nth-child(n+3){text-align:center}.review-table td:nth-child(n+3) .badge{display:inline-flex;align-items:center;justify-content:center;min-width:0;width:100%;max-width:150px;min-height:32px;white-space:normal;line-height:1.4}.review-table.submission-selectable th:first-child{width:48px}.review-table.submission-selectable th:nth-child(2){width:26%}.review-table.submission-selectable th:nth-child(3){width:20%}.review-table.submission-selectable th:nth-child(n+4){width:17%}.review-table.submission-selectable td:nth-child(3){text-align:left}@media(max-width:1000px){.stats.stats-review-flow{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.status-flow.status-flow-4,.status-flow.status-flow-5{grid-template-columns:minmax(0,1fr)}}
+
+.story-flow.story-flow-checker{grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;max-width:560px}@media(max-width:1100px){.story-flow.story-flow-checker{gap:16px}}
