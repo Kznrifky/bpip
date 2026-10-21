@@ -859,46 +859,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
  .portal-result-summary > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
 
-/* IT submits Officer accounts; BOH reviews the pending requests. */
-.account-management { gap: 24px; }
-.account-management .page-heading { margin-bottom: 0; }
-.account-card > .card-head { background: #0756bd; color: white; padding: 18px 24px; border-bottom: 0; border-radius: 11px 11px 0 0; flex-wrap: wrap; }
-.account-card > .card-head h2 { color: white; font-size: 18px; }
-.account-card > .card-head select { width: 180px; min-height: 40px; }
-.account-count { font-size: 14px; color: #e4efff; }
-.account-table th { background: #f3f7fc; color: #657895; }
-.account-table td { color: #142c52; padding-block: 18px; }
-.account-table td strong { display: block; }
-.account-table td small { display: block; margin-top: 5px; color: #657895; overflow-wrap: anywhere; }
-.account-table .btn { white-space: nowrap; color: #0756bd; }
-.account-table .account-actions { width: 190px; text-align: center; }
-.account-table .account-actions .btn { min-width: 88px; gap: 7px; }
-.account-requests-table .account-actions { width: 124px; }
-.account-requests-table td:first-child { min-width: 230px; }
-.account-requests-table td:nth-child(4) { white-space: nowrap; }
-.account-user-actions { justify-content: center; gap: 8px; flex-wrap: nowrap; }
-.account-table .account-delete-action { color: #b42318; border-color: #f0d6d6; background: #fff7f7; }
-.account-table .account-delete-action:hover { background: #ffeded; }
 .detail-maker { margin-top: 6px; font-size: 14px; }
-.account-help { color: #657895; font-size: 14px; line-height: 1.6; }
-.account-request-details { margin: 0; display: grid; gap: 14px; }
-.account-request-details > div { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 16px; }
-.account-request-details dt { color: #657895; font-size: 14px; }
-.account-request-details dd { margin: 0; font-weight: 600; color: #142c52; overflow-wrap: anywhere; }
-.account-review-history { padding-top: 16px; border-top: 1px solid #dce7f5; }
-.account-review-history p { margin-top: 8px; color: #657895; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 760px) {
- .account-management .page-heading { align-items: stretch; }
- .account-management .page-heading > .btn { width: 100%; }
- .account-card > .card-head { padding: 16px; }
- .account-card > .card-head h2 { font-size: 16px; }
- .account-card > .card-head select { width: 100%; }
- .account-table.record-table td { padding: 0; }
- .account-table.record-table .account-actions { width: auto; }
- .account-requests-table td:first-child { min-width: 0; }
- .account-requests-table td:nth-child(4) { white-space: normal; }
- .account-request-details > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-}
 
 /* Open submission details from the row, with a keyboard-accessible name link. */
 .table tr[data-document-row] { cursor: pointer; }

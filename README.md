@@ -78,23 +78,19 @@ Perintah `init` meminta email, nama dan password untuk petugas dan AMOL. Passwor
 
 Password dapat diganti di menu Pengaturan. Sesi lain dicabut setelah perubahan password.
 
-### Role IT dan persetujuan akun Officer
+### Role dan pengelolaan akun
 
-IT membuka **Kelola Akun → Ajukan akun Officer**, mengisi nama, email, serta kata sandi awal minimal 12 karakter. Akun belum dapat login selama statusnya **Menunggu BOH**. BOH membuka **Persetujuan Akun → Periksa** dan memilih **Setujui akun** atau **Tolak** dengan alasan. Persetujuan membuat akun dengan role Officer; penolakan tidak membuat akun. Keputusan hanya dapat diberikan sekali dan email yang sedang menunggu tidak dapat diajukan dua kali.
+Aplikasi menggunakan role Officer (`petugas`), AMOL (`sol`), dan BOH (`boh`). Role IT dan fitur pengelolaan akun melalui web sudah dihapus, termasuk menu persetujuan akun di BOH. Endpoint pengelolaan akun lama tidak dapat digunakan lagi.
 
-IT memilih **Edit** pada daftar **Akun Officer Aktif**, lalu mengajukan nama baru ke BOH. Nama lama tetap berlaku sampai BOH menyetujui perubahan. Perubahan mempertahankan email, kata sandi, role, ID akun, dan kepemilikan pengajuan. Nama baru muncul pada sesi Officer saat data diperbarui dan pada kolom Pengaju. Pembuatan, keputusan BOH, serta perubahan nama dicatat dalam audit pengelolaan. API pengelolaan tidak mengembalikan kata sandi atau hash; hash sementara hanya disimpan sampai pengajuan diputuskan.
+Akun IT lama dinonaktifkan dan sesinya dicabut saat startup. Identitas akun serta riwayat pengajuan dan audit lama tetap tersimpan; akun Officer, AMOL, dan BOH tidak diubah. Pengajuan akun yang dahulu menunggu persetujuan tidak diproses otomatis.
 
-IT memilih **Hapus**, mengisi alasan, lalu mengajukan penghapusan ke BOH. Akun tetap aktif selama menunggu. Persetujuan BOH menonaktifkan akun dan mencabut seluruh sesinya, sehingga akun tidak dapat login lagi. ID, nama akun, data pengajuan, surat, dan riwayat tetap tersimpan. Akun hilang dari daftar Officer aktif; emailnya tetap tercatat dan tidak dapat digunakan untuk membuat akun pengganti. Pengajuan perubahan nama dan penghapusan pada akun yang sama tidak dapat menunggu bersamaan. Penolakan BOH wajib disertai catatan dan mempertahankan akun.
-
-IT memiliki akses pengelolaan akun Officer dan kata sandi sendiri. Role ini tidak memiliki akses data nasabah, transaksi, surat, laporan PDF, atau antrean email. AMOL dan Officer tidak dapat mengajukan atau memutuskan pengelolaan akun. BOH memutuskan pengajuan akun baru, perubahan nama, dan penghapusan dari IT; BOH tidak membuat akun langsung. Startup menambahkan status aktif pada akun lama tanpa mengganti ID, nama, maupun kata sandi.
-
-Administrator menyiapkan akun IT pertama melalui terminal pada database yang dituju:
+Administrator menyiapkan akun melalui terminal pada database yang dituju:
 
 ```sh
-python3 server.py create-user --role it
+python3 server.py create-user --role petugas
 ```
 
-Perintah meminta email, nama, dan kata sandi yang tidak ditampilkan saat diketik. Akun BOH awal juga dapat disiapkan dengan `--role boh`. Perintah ini tidak mengubah akun yang sudah ada; jangan menjalankannya tanpa memastikan database yang dituju. Fitur tidak membuat akun IT atau BOH produksi secara otomatis saat startup.
+Gunakan `--role sol` untuk AMOL atau `--role boh` untuk BOH. Perintah meminta email, nama, dan kata sandi yang tidak ditampilkan saat diketik. Perintah tidak mengubah akun yang sudah ada; pastikan database yang dituju sebelum menjalankannya.
 
 ## Hosting dan batas operasional
 
