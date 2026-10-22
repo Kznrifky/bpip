@@ -13,13 +13,14 @@ class DualVerificationTests(unittest.TestCase):
     tearDown = workflow.WorkflowTests.tearDown
     boh_client = workflow.WorkflowTests.boh_client
     customer_edit = workflow.WorkflowTests.customer_edit
+    register_customer = workflow.WorkflowTests.register_customer
     create = workflow.WorkflowTests.create
     respond = workflow.WorkflowTests.respond
 
     def dual_customer(self, **changes):
         payload = dict(cif='2223334', name='PT Dua Verifikator', account='000123456789012', person='Direktur', email='direktur@example.test', phone='081234567890', verification_count=2, verifier_name='Adi Utama', second_name='Maya Putri', second_person='Komisaris', second_email='komisaris@example.test', second_phone='081234567891')
         payload.update(changes)
-        status, result, _ = self.sol.call('/customers', payload)
+        status, result, _ = self.register_customer(payload)
         self.assertEqual(status, 201, result)
         saved = next(c for c in self.sol.call('/customers')[1]['customers'] if c['cif']==payload['cif'])
         self.assertEqual(saved['second_phone'], payload['second_phone'])
@@ -111,7 +112,7 @@ class DualVerificationTests(unittest.TestCase):
     def test_validation_channels_and_no_new_access(self):
         base = self.dual_customer()
         for changes in ({'verification_count':3}, {'verification_count':'2'}, {'second_email':base['email']}, {'second_email':'INVALID'}, {'second_name':''}, {'verifier_name':''}, {'second_person':''}, {'second_phone':''}, {'second_phone':'abc'}):
-            status, _, _ = self.sol.call('/customers', {**base, 'cif':'9998887', **changes})
+            status, _, _ = self.checker.call('/customer-create-requests', {**base, 'cif':'9998887', **changes})
             self.assertEqual(status, 400, changes)
         for channel in ('whatsapp','both'):
             status, _, _ = self.maker.call('/documents', {**DESTINATION,'cif':base['cif'],'kind':'Standing Instruction','nominal':1,'file':FILE,'channel':channel})

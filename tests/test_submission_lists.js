@@ -185,7 +185,7 @@ test('Customer directory contains only the four requested columns', () => {
   const target={innerHTML:'',querySelectorAll:()=>[]}, count={};
   context.$=selector=>selector==='#customer-table'?target:selector==='#customer-list-count'?count:null;
   context.labelRecordTables=()=>{};
-  Object.assign(context.state,{customerEditMode:false,customerDeleteMode:false,customerSearch:'',customerSelected:[],customerUpdates:[],customers:[{cif:'123',name:'PT Satu',account:'000123456789012',person:'Direktur',email:'private@example.test',phone:'081234567890',verification_count:1},{cif:'456',name:'PT Dua',account:'000987654321012',verification_count:2}]});
+  Object.assign(context.state,{user:{role:'checker'},customerEditMode:false,customerDeleteMode:false,customerSearch:'',customerSelected:[],customerUpdates:[],customers:[{cif:'123',name:'PT Satu',account:'000123456789012',person:'Direktur',email:'private@example.test',phone:'081234567890',verification_count:1},{cif:'456',name:'PT Dua',account:'000987654321012',verification_count:2}]});
   context.renderCustomerTable();
   const html=target.innerHTML;
   assert.equal((html.match(/<th>/g)||[]).length,4);

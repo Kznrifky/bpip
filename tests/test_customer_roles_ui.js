@@ -15,26 +15,26 @@ function contextFor(role){
  return {context,element,dialog};
 }
 
-test('SOL can open customer edit and registration forms; AMOL keeps direct registration',()=>{
+test('Only SOL can open customer edit and registration forms',()=>{
  for(const role of ['checker','sol','boh','petugas']){
   const {context,dialog}=contextFor(role);vm.runInContext(take('newCustomer','renderEmails'),context);
   context.newCustomer(fixture);
   assert.equal(dialog.opened,role==='checker',role+' edit');
   if(role==='checker'){assert.match(dialog.innerHTML,/Ajukan ke AMOL/);assert.doesNotMatch(dialog.innerHTML,/BOH/);}
-  dialog.opened=false;context.newCustomer();assert.equal(dialog.opened,['checker','sol'].includes(role),role+' add');
+  dialog.opened=false;context.newCustomer();assert.equal(dialog.opened,role==='checker',role+' add');
   if(role==='checker')assert.match(dialog.innerHTML,/Ajukan ke AMOL/);
  }
 });
 
-test('Customer actions place SOL Edit and AMOL Hapus after the Add button',()=>{
- for(const role of ['checker','sol']){
+test('Only SOL has customer actions, with Add at the far right',()=>{
+ for(const role of ['checker','sol','boh','petugas']){
   const {context,element}=contextFor(role);vm.runInContext(take('renderCustomers','renderCustomerTable'),context);context.renderCustomers();
   const html=element('#main').innerHTML;
-  assert.equal(html.includes('data-action="select-customer-edit"'),role==='checker');
-  assert.equal(html.includes('data-action="select-customers"'),role==='sol');
-  assert.equal(html.includes('data-action="new-customer"'),true);
-  const lastAction=role==='checker'?'select-customer-edit':'select-customers';
-  assert.ok(html.indexOf('data-action="new-customer"')<html.indexOf('data-action="'+lastAction+'"'));
+  for(const action of ['select-customer-edit','select-customers','new-customer'])assert.equal(html.includes('data-action="'+action+'"'),role==='checker');
+  if(role==='checker'){
+   assert.ok(html.indexOf('data-action="select-customers"')<html.indexOf('data-action="select-customer-edit"'));
+   assert.ok(html.indexOf('data-action="select-customer-edit"')<html.indexOf('data-action="new-customer"'));
+  }
  }
 });
 
@@ -60,3 +60,12 @@ test('Only a distinct AMOL account sees customer-change approval controls',()=>{
   assert.match(dialog.innerHTML,/Setujui nasabah/);
   assert.doesNotMatch(dialog.innerHTML,/undefined|Data nasabah tetap menggunakan data lama/);
  });
+
+test('Deletion review describes the retained transaction history and uses a deletion decision',()=>{
+ const {context,dialog}=contextFor('sol');
+ context.state.customerUpdates=[{id:'delete',operation:'delete',old_data:fixture,new_data:{},requested_by:'requester',requested_name:'SOL',status:'pending',reason:'Tidak digunakan'}];
+ vm.runInContext(take('viewCustomerUpdate','renderArchive').replace(/async $/,''),context);
+ context.viewCustomerUpdate('delete');
+ assert.match(dialog.innerHTML,/Setujui penghapusan/);assert.match(dialog.innerHTML,/Riwayat pengajuan tetap tersimpan/);
+ assert.doesNotMatch(dialog.innerHTML,/undefined|Setujui perubahan/);
+});

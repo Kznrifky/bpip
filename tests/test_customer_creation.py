@@ -90,10 +90,10 @@ class CustomerCreationTests(unittest.TestCase):
         self.assertEqual(self.checker.call('/customer-create-requests', self.payload('1234567'))[0], 409)
         request_id = self.submit(data)
         self.assertEqual(self.checker.call('/customer-create-requests', data)[0], 409)
-        self.assertEqual(self.sol.call('/customers', data)[0], 409)
+        self.assertEqual(self.sol.call('/customers', data)[0], 403)
         self.assertEqual(self.review(request_id)[0], 200)
         self.assertEqual(self.checker.call('/customer-create-requests', data)[0], 409)
-        self.assertEqual(self.sol.call('/customers', data)[0], 409)
+        self.assertEqual(self.sol.call('/customers', data)[0], 403)
 
     def test_concurrent_submissions_and_decisions_create_exactly_one_customer(self):
         data = self.payload()
