@@ -105,6 +105,13 @@ class CheckerFlowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(pdf));text='\n'.join(page.extract_text() for page in reader.pages)
         for expected in ('SOL (Checker)','SOL menyetujui pengajuan','AMOL menyetujui pengajuan','SOL Checker','Bambang Haryanto','First Director','Second Director','ORIGINAL SI CHECKER FLOW'):
             self.assertIn(expected,text)
+        approvals=text.split('RIWAYAT PERNYATAAN DAN PERSETUJUAN',1)[1].split('LOG AKTIVITAS',1)[0]
+        self.assertIn('\nSOL\n',approvals);self.assertIn('\nAMOL\n',approvals)
+        self.assertNotIn('SOL (SOL)',approvals);self.assertNotIn('AMOL (AMOL)',approvals)
+        self.assertEqual(text.count('LOG AKTIVITAS'),1)
+        self.assertNotIn('SOL (SOL)',text);self.assertNotIn('AMOL (AMOL)',text)
+        self.assertEqual(text.count('Email diterima server SMTP'),1)
+        self.assertIn('Pengiriman email konfirmasi (2 email)',text)
         self.assertNotIn(self.tokens(doc)[0],text)
         Path('/private/tmp/bri-sol-amol-flow.pdf').write_bytes(pdf)
     def test_migration_upgrades_active_records_but_keeps_legacy_completed_documents(self):
