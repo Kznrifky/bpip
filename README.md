@@ -168,3 +168,12 @@ Data nasabah diperbarui secara atomik setelah persetujuan AMOL. Satu nasabah han
 Permintaan dan audit lama tetap tersimpan tanpa persetujuan otomatis atau penggantian identitas pengaju. BOH hanya memiliki menu Dashboard dan History, tanpa akses perubahan data nasabah atau approval. Perubahan role dan akun produksi tidak dijalankan otomatis.
 
 Pengiriman konfirmasi dicatat per link: Email dan WhatsApp yang sudah dipilih tidak dapat dipilih lagi untuk link yang sama, termasuk setelah halaman dimuat ulang. Memilih Keduanya mengunci kedua pilihan setelah diproses; WhatsApp tetap dikirim manual dari pratinjau, sehingga status pilihan bukan laporan pengiriman dari WhatsApp. Kanal yang belum dipilih dapat menggunakan link yang masih aktif tanpa membuat versi baru. Kirim ulang menerbitkan link baru setelah 24 jam atau ketika link lama kedaluwarsa.
+
+
+### Username akun Officer
+
+Form masuk menerima username Officer atau email. Username unik tanpa membedakan huruf besar/kecil; akun SOL, AMOL, BOH, dan akun lama tetap masuk memakai email. Migrasi menambahkan kolom `users.username` dan indeks unik tanpa mengganti akun, kata sandi, atau riwayat.
+
+Penyiapan empat akun Officer dilakukan secara eksplisit melalui terminal: `PYTHONPATH="$PWD" python scripts/provision_officer_logins.py`. Berikan JSON `accounts` yang memetakan username ke kata sandi, serta `retire_emails` bila akun Officer lama ingin dinonaktifkan. Skrip membuat backup privat, mempertahankan identitas akun yang sudah disiapkan, mencabut sesi akun yang diperbarui, dan tidak mengubah data transaksi atau akun role lain. Penyiapan administratif Officer menerima kata sandi minimal 11 karakter; form penggantian kata sandi mandiri tetap minimal 12 karakter. Kata sandi tidak disimpan dalam kode maupun ditampilkan pada keluaran skrip.
+
+Nama tampilan Officer mengikuti username. Pengajuan baru menyimpan kejadian **Dokumen diajukan oleh [nama akun]**, dengan pengaju diambil dari sesi terautentikasi. Identitas pembuat dan audit lama tidak dialihkan ke akun baru. Fitur pengelolaan akun melalui web tetap dinonaktifkan.

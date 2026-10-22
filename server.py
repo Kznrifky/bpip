@@ -66,7 +66,7 @@ SESSION_TTL = 8 * 3600
 DEMO = False
 EXECUTION_PDF_LOCK = threading.Lock()
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, role TEXT, password TEXT, active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, role TEXT, password TEXT, active INTEGER NOT NULL DEFAULT 1, username TEXT);
 CREATE TABLE IF NOT EXISTS officer_account_requests(
  id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, password_hash TEXT,
  requested_by TEXT NOT NULL, requested_name TEXT NOT NULL, created TEXT NOT NULL,
@@ -156,6 +156,9 @@ def initialize():
         db.execute('BEGIN IMMEDIATE')
         if 'active' not in {row['name'] for row in db.execute('PRAGMA table_info(users)')}:
             db.execute('ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1')
+        if 'username' not in {row['name'] for row in db.execute('PRAGMA table_info(users)')}:
+            db.execute('ALTER TABLE users ADD COLUMN username TEXT')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username COLLATE NOCASE) WHERE username IS NOT NULL')
         # Retired IT identities remain for audit history, but cannot access the app.
         db.execute("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role='it')")
         db.execute("UPDATE users SET active=0 WHERE role='it' AND active<>0")
@@ -806,16 +809,17 @@ class Handler(BaseHTTPRequestHandler):
             password = secret_field(data, 'password')
             with database(True) as db:
                 db.execute('DELETE FROM login_attempts WHERE at<?', (time.time() - 900,))
-                count = db.execute('SELECT COUNT(*) FROM login_attempts WHERE ip=? OR email=?', (ip, email)).fetchone()[0]
+                user = db.execute("SELECT * FROM users WHERE email=? OR (role='petugas' AND username=? COLLATE NOCASE)", (email, email)).fetchone()
+                attempt_key = user['email'].lower() if user else email
+                count = db.execute('SELECT COUNT(*) FROM login_attempts WHERE ip=? OR email=?', (ip, attempt_key)).fetchone()[0]
                 require(count < 10, 'Terlalu banyak percobaan masuk. Coba lagi dalam 15 menit.', 429)
-                user = db.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
                 dummy = '0' * 32 + ':' + '0' * 64
                 ok = password_matches(password, user['password'] if user else dummy)
                 if not user or not ok or not user['active'] or user['role'] not in ('petugas', 'sol', 'boh', 'checker'):
-                    db.execute('INSERT INTO login_attempts VALUES(?,?,?)', (ip, email, time.time()))
+                    db.execute('INSERT INTO login_attempts VALUES(?,?,?)', (ip, attempt_key, time.time()))
                     db.commit()
-                    raise AppError(401, 'Email atau password tidak sesuai.')
-                db.execute('DELETE FROM login_attempts WHERE email=?', (email,))
+                    raise AppError(401, 'Username/email atau kata sandi tidak sesuai.')
+                db.execute('DELETE FROM login_attempts WHERE email=?', (attempt_key,))
                 db.execute('DELETE FROM sessions WHERE expires<?', (time.time(),))
                 raw, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
                 db.execute('INSERT INTO sessions VALUES(?,?,?,?)', (digest(raw), user['id'], csrf, time.time() + SESSION_TTL))
@@ -1022,6 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
                     config = [{'name': customer['verifier_name'], 'person': customer['person'], 'email': customer['email'], 'phone': customer['phone']}, {'name': customer['second_name'], 'person': customer['second_person'], 'email': customer['second_email'], 'phone': customer['second_phone']}]
                     db.execute('UPDATE documents SET verifier_config=? WHERE id=?', (json.dumps(config), doc_id))
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
+                add_audit(db, doc, 'Dokumen diajukan oleh ' + user['name'], user['name'], '', ip, agent)
                 preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
                 db.commit()
                 return self.respond({'id': doc_id, 'whatsapp': preview}, 201)
