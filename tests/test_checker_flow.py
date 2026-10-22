@@ -103,9 +103,13 @@ class CheckerFlowTests(unittest.TestCase):
         doc=self.create(dual=True,real_pdf=True);self.confirm(doc);self.review(doc,checker=True);self.review(doc)
         status,pdf,_=self.maker.call('/documents/'+doc+'/execution-pdf');self.assertEqual(status,200)
         reader=PdfReader(BytesIO(pdf));text='\n'.join(page.extract_text() for page in reader.pages)
-        for expected in ('SOL (Checker)','SOL menyetujui pengajuan','AMOL menyetujui pengajuan','SOL Checker','Bambang Haryanto','First Director','Second Director','ORIGINAL SI CHECKER FLOW'):
+        self.assertGreater(len(reader.pages[0].images),0)
+        self.assertGreater(len(reader.pages[1].images),0)
+        for expected in ('DOKUMEN KONFIRMASI PELAKSANAAN','SOL menyetujui pengajuan','AMOL menyetujui pengajuan','SOL Checker','Bambang Haryanto','First Director','Second Director','ORIGINAL SI CHECKER FLOW'):
             self.assertIn(expected,text)
+        self.assertNotIn('Pengajuan telah dikonfirmasi seluruh verifikator',text)
         approvals=text.split('RIWAYAT PERNYATAAN DAN PERSETUJUAN',1)[1].split('LOG AKTIVITAS',1)[0]
+        self.assertNotIn('SOL (Checker)',approvals)
         self.assertIn('\nSOL\n',approvals);self.assertIn('\nAMOL\n',approvals)
         self.assertNotIn('SOL (SOL)',approvals);self.assertNotIn('AMOL (AMOL)',approvals)
         self.assertEqual(text.count('LOG AKTIVITAS'),1)

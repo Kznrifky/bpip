@@ -328,8 +328,9 @@ class WorkflowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(body))
         self.assertEqual(len(reader.pages),3)  # Two report pages plus the original, no blank cover.
         text='\n'.join(page.extract_text() for page in reader.pages)
-        for expected in ['SURAT KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','AMOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
+        for expected in ['DOKUMEN KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','AMOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
             self.assertIn(expected,text)
+        self.assertNotIn('Pengajuan telah dikonfirmasi seluruh verifikator',text)
         self.assertEqual(reader.attachments['si-original.pdf'][0],original.getvalue())
         self.assertNotIn(self.token(doc),text)
         # Existing audit rows retain their original wording in storage while
