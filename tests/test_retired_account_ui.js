@@ -21,7 +21,7 @@ for (const role of ['petugas','sol','boh','checker']) {
   if(role!=='boh')assert.match(context.app.innerHTML,/data-route="settings"/);
   assert.doesNotMatch(context.app.innerHTML,/data-route="accounts"|Persetujuan Akun|Kelola Akun/);
   assert.ok(!requests.some(path=>/officer|accounts/.test(path)));
-  if(role==='checker'){assert.match(context.app.innerHTML,/Pemeriksaan/);assert.match(context.app.innerHTML,/data-route="customers"/);assert.match(context.app.innerHTML,/data-route="customer-updates"/);assert.doesNotMatch(context.app.innerHTML,/data-route="initiate"/);assert.ok(requests.includes('/customers'));assert.ok(requests.includes('/customer-edit-requests'));}
+  if(role==='checker'){assert.doesNotMatch(context.app.innerHTML,/Pemeriksaan|data-route="documents"/);assert.match(context.app.innerHTML,/data-route="customers"/);assert.match(context.app.innerHTML,/data-route="customer-updates"/);assert.doesNotMatch(context.app.innerHTML,/data-route="initiate"/);assert.ok(requests.includes('/customers'));assert.ok(requests.includes('/customer-edit-requests'));}
   if(role==='boh'){
    assert.match(context.app.innerHTML,/data-route="history"/);
    assert.doesNotMatch(context.app.innerHTML,/data-route="customer-updates"|data-route="customers"|data-route="documents"|data-route="initiate"|data-route="emails"|data-route="settings"/);
