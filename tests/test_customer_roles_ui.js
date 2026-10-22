@@ -15,23 +15,26 @@ function contextFor(role){
  return {context,element,dialog};
 }
 
-test('SOL can open the customer edit form; AMOL can add customers but cannot submit edits',()=>{
+test('SOL can open customer edit and registration forms; AMOL keeps direct registration',()=>{
  for(const role of ['checker','sol','boh','petugas']){
   const {context,dialog}=contextFor(role);vm.runInContext(take('newCustomer','renderEmails'),context);
   context.newCustomer(fixture);
   assert.equal(dialog.opened,role==='checker',role+' edit');
   if(role==='checker'){assert.match(dialog.innerHTML,/Ajukan ke AMOL/);assert.doesNotMatch(dialog.innerHTML,/BOH/);}
-  dialog.opened=false;context.newCustomer();assert.equal(dialog.opened,role==='sol',role+' add');
+  dialog.opened=false;context.newCustomer();assert.equal(dialog.opened,['checker','sol'].includes(role),role+' add');
+  if(role==='checker')assert.match(dialog.innerHTML,/Ajukan ke AMOL/);
  }
 });
 
-test('Customer directory puts editing on SOL and keeps existing add/delete controls on AMOL',()=>{
+test('Customer actions place SOL Edit and AMOL Hapus after the Add button',()=>{
  for(const role of ['checker','sol']){
   const {context,element}=contextFor(role);vm.runInContext(take('renderCustomers','renderCustomerTable'),context);context.renderCustomers();
   const html=element('#main').innerHTML;
   assert.equal(html.includes('data-action="select-customer-edit"'),role==='checker');
   assert.equal(html.includes('data-action="select-customers"'),role==='sol');
-  assert.equal(html.includes('data-action="new-customer"'),role==='sol');
+  assert.equal(html.includes('data-action="new-customer"'),true);
+  const lastAction=role==='checker'?'select-customer-edit':'select-customers';
+  assert.ok(html.indexOf('data-action="new-customer"')<html.indexOf('data-action="'+lastAction+'"'));
  }
 });
 
@@ -47,3 +50,13 @@ test('Only a distinct AMOL account sees customer-change approval controls',()=>{
   assert.doesNotMatch(dialog.innerHTML,/BOH/);
  }
 });
+
+ test('New customer request displays its name and approval action without requiring an old master',()=>{
+  const {context,dialog}=contextFor('sol');
+  context.state.customerUpdates=[{id:'new',operation:'create',old_data:{},new_data:fixture,requested_by:'requester',requested_name:'SOL',status:'pending',reason:'Nasabah baru'}];
+  vm.runInContext(take('viewCustomerUpdate','renderArchive').replace(/async $/,''),context);
+  context.viewCustomerUpdate('new');
+  assert.match(dialog.innerHTML,/PT Contoh/);
+  assert.match(dialog.innerHTML,/Setujui nasabah/);
+  assert.doesNotMatch(dialog.innerHTML,/undefined|Data nasabah tetap menggunakan data lama/);
+ });

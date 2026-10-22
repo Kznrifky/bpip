@@ -44,7 +44,7 @@ class BOHReadOnlyTests(unittest.TestCase):
                     for action in ('review', 'checker-review', 'send-confirmation', 'resend', 'revise', 'cancel', 'archive', 'restore', 'purge')
                     for decision in ('approved', 'rejected')]
         attempts += [('/customer-edit-requests/' + request_id + '/review', {'decision': decision, 'notes': 'Forbidden'}) for decision in ('approved', 'rejected')]
-        attempts += [('/customers', {}), ('/documents', {}), ('/customers/1234567/edit-requests', self.customer_edit()),
+        attempts += [('/customer-create-requests', {}), ('/customers', {}), ('/documents', {}), ('/customers/1234567/edit-requests', self.customer_edit()),
                      ('/customers/1234567/phone', {'phone': '081234567899'}), ('/customers/delete-selected', {'cifs': ['1234567']}),
                      ('/documents/archive-selected', {'documents': [{'id': doc, 'version': 1}]})]
         for endpoint, payload in attempts:

@@ -86,6 +86,7 @@ CREATE INDEX IF NOT EXISTS attempts_time ON login_attempts(at);
 CREATE TABLE IF NOT EXISTS customers(cif TEXT PRIMARY KEY, name TEXT, account TEXT, person TEXT, email TEXT, phone TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS customer_edit_requests(
  id TEXT PRIMARY KEY, cif TEXT NOT NULL, old_data TEXT NOT NULL, new_data TEXT NOT NULL,
+ operation TEXT NOT NULL DEFAULT 'update',
  reason TEXT NOT NULL, requested_by TEXT NOT NULL, requested_name TEXT NOT NULL,
  created TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reviewed_by TEXT,
  reviewed_name TEXT NOT NULL DEFAULT '', review_notes TEXT NOT NULL DEFAULT '', reviewed_at TEXT);
@@ -162,6 +163,8 @@ def initialize():
             db.execute("ALTER TABLE customers ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
         if 'revision' not in {row['name'] for row in db.execute('PRAGMA table_info(customers)')}:
             db.execute('ALTER TABLE customers ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
+        if 'operation' not in {row['name'] for row in db.execute('PRAGMA table_info(customer_edit_requests)')}:
+            db.execute("ALTER TABLE customer_edit_requests ADD COLUMN operation TEXT NOT NULL DEFAULT 'update'")
         customer_columns = {row['name'] for row in db.execute('PRAGMA table_info(customers)')}
         for column, definition in VERIFIER_COLUMNS.items():
             if column not in customer_columns:
@@ -329,6 +332,21 @@ def verifier_fields(data, existing=None):
 
 def normalized_customer_snapshot(customer):
     return {**{'verification_count': 1, 'verifier_name': '', 'second_name': '', 'second_person': '', 'second_email': '', 'second_phone': ''}, **dict(customer)}
+
+def new_customer_data(data):
+    cif = text_field(data, 'cif', 30)
+    require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
+    account = text_field(data, 'account', 50)
+    require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
+    return {'cif': cif, 'name': text_field(data, 'name'), 'account': account,
+            'person': text_field(data, 'person'), 'email': valid_email(text_field(data, 'email')),
+            'phone': valid_phone(text_field(data, 'phone', 30)), **verifier_fields(data)}
+
+def insert_customer(db, values):
+    require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (values['cif'],)).fetchone(), 'CIF sudah terdaftar.', 409)
+    columns = ('cif', *CUSTOMER_FIELDS)
+    db.execute('INSERT INTO customers('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',
+               tuple(values[key] for key in columns))
 
 def verification_rows(db, doc):
     rows = [dict(row) for row in db.execute('SELECT position,name,person,email,status,used_at,notes FROM document_verifications WHERE doc_id=? AND version=? ORDER BY position', (doc['id'], doc['version']))]
@@ -865,16 +883,34 @@ class Handler(BaseHTTPRequestHandler):
                 require(decision in ('approved', 'rejected'), 'Keputusan tidak valid.')
                 notes = text_field(data, 'notes', 1500, decision == 'rejected')
                 if decision == 'approved':
-                    customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (request['cif'],)).fetchone()
-                    require(customer is not None, 'Nasabah sudah dihapus. Pembaruan tidak dapat disetujui.', 409)
-                    before, after = normalized_customer_snapshot(json.loads(request['old_data'])), normalized_customer_snapshot(json.loads(request['new_data']))
-                    require(customer_snapshot(customer) == before, 'Data nasabah sudah berubah. Tolak permintaan ini dan minta SOL mengajukan pembaruan baru.', 409)
-                    db.execute('UPDATE customers SET '+','.join(key+'=?' for key in CUSTOMER_FIELDS)+',revision=revision+1 WHERE cif=?', (*[after[key] for key in CUSTOMER_FIELDS], request['cif']))
+                    if request['operation'] == 'create':
+                        values = new_customer_data(json.loads(request['new_data']))
+                        require(values['cif'] == request['cif'], 'CIF usulan tidak sesuai.', 409)
+                        insert_customer(db, values)
+                    else:
+                        require(request['operation'] == 'update', 'Jenis permintaan tidak valid.', 409)
+                        customer = db.execute('SELECT * FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (request['cif'],)).fetchone()
+                        require(customer is not None, 'Nasabah sudah dihapus. Pembaruan tidak dapat disetujui.', 409)
+                        before, after = normalized_customer_snapshot(json.loads(request['old_data'])), normalized_customer_snapshot(json.loads(request['new_data']))
+                        require(customer_snapshot(customer) == before, 'Data nasabah sudah berubah. Tolak permintaan ini dan minta SOL mengajukan pembaruan baru.', 409)
+                        db.execute('UPDATE customers SET '+','.join(key+'=?' for key in CUSTOMER_FIELDS)+',revision=revision+1 WHERE cif=?', (*[after[key] for key in CUSTOMER_FIELDS], request['cif']))
                 db.execute('UPDATE customer_edit_requests SET status=?,reviewed_by=?,reviewed_name=?,review_notes=?,reviewed_at=? WHERE id=?', (decision, user['id'], user['name'], notes, now(), request['id']))
-                management_audit(db, 'customers/' + request['cif'], ('AMOL menyetujui' if decision == 'approved' else 'AMOL menolak') + ' pembaruan: ' + request['id'], user)
+                management_audit(db, 'customers/' + request['cif'], ('AMOL menyetujui' if decision == 'approved' else 'AMOL menolak') + (' penambahan nasabah: ' if request['operation'] == 'create' else ' pembaruan: ') + request['id'], user)
                 db.commit()
                 return self.respond({'ok': True})
-            require(user['role'] != 'checker' or bool(re.fullmatch(r'/api/documents/[^/]+/checker-review|/api/customers/[0-9]{3,30}/(?:edit-requests|phone)', path)), 'SOL hanya dapat memeriksa pengajuan dan mengajukan perubahan data nasabah.', 403)
+            require(user['role'] != 'checker' or bool(re.fullmatch(r'/api/customer-create-requests|/api/documents/[^/]+/checker-review|/api/customers/[0-9]{3,30}/(?:edit-requests|phone)', path)), 'SOL hanya dapat memeriksa pengajuan dan mengajukan perubahan data nasabah.', 403)
+            if path == '/api/customer-create-requests':
+                require(user['role'] == 'checker', 'Hanya SOL yang dapat mengajukan penambahan nasabah.', 403)
+                values = new_customer_data(data)
+                require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (values['cif'],)).fetchone(), 'CIF sudah terdaftar.', 409)
+                require(not db.execute("SELECT 1 FROM customer_edit_requests WHERE cif=? AND status='pending'", (values['cif'],)).fetchone(), 'Masih ada permintaan nasabah dengan CIF ini yang menunggu persetujuan AMOL.', 409)
+                request_id = secrets.token_hex(12)
+                reason = text_field(data, 'reason', 1500, False) or 'Penambahan nasabah baru oleh SOL.'
+                db.execute("INSERT INTO customer_edit_requests(id,cif,operation,old_data,new_data,reason,requested_by,requested_name,created) VALUES(?,?,'create','{}',?,?,?,?,?)",
+                           (request_id, values['cif'], json.dumps(values), reason, user['id'], user['name'], now()))
+                management_audit(db, 'customers/' + values['cif'], 'SOL mengajukan penambahan nasabah ke AMOL: ' + request_id, user)
+                db.commit()
+                return self.respond({'id': request_id, 'status': 'pending', 'operation': 'create'}, 201)
             customer_edit = re.fullmatch(r'/api/customers/([0-9]{3,30})/edit-requests', path)
             if customer_edit:
                 require(user['role'] == 'checker', 'Hanya SOL yang dapat mengajukan pembaruan nasabah.', 403)
@@ -987,14 +1023,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({'ok':True, 'id': request_id, 'status': 'pending'})
             if path == '/api/customers':
                 require(user['role'] == 'sol', 'Hanya AMOL yang dapat menambah nasabah.', 403)
-                cif = text_field(data, 'cif', 30)
-                require(re.fullmatch(r'[0-9]{3,30}', cif), 'CIF harus 3–30 digit.')
-                account = text_field(data, 'account', 50)
-                require(re.fullmatch(r'[0-9]{15}', account), 'Nomor rekening harus berupa tepat 15 digit angka.')
-                values = (cif, text_field(data, 'name'), account, text_field(data, 'person'), valid_email(text_field(data, 'email')), valid_phone(text_field(data, 'phone', 30)))
-                require(not db.execute('SELECT 1 FROM customers WHERE cif=?', (cif,)).fetchone(), 'CIF sudah terdaftar.', 409)
-                verification = verifier_fields(data)
-                db.execute('INSERT INTO customers(cif,name,account,person,email,phone,'+','.join(VERIFIER_COLUMNS)+') VALUES(?,?,?,?,?,?,'+','.join('?' for _ in VERIFIER_COLUMNS)+')', (*values, *verification.values()))
+                values = new_customer_data(data)
+                require(not db.execute("SELECT 1 FROM customer_edit_requests WHERE cif=? AND status='pending'", (values['cif'],)).fetchone(), 'Tinjau permintaan nasabah dengan CIF ini melalui Update Data.', 409)
+                insert_customer(db, values)
                 db.commit()
                 return self.respond({'ok': True}, 201)
             if path == '/api/documents':

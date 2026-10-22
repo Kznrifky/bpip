@@ -157,7 +157,7 @@ select.input, .field select { appearance: none; padding-right: 36px; background-
 .selection-actions { flex-wrap: nowrap; }
 .selection-actions .btn { min-width: 100px; }
 .customers-card-head { flex-wrap: wrap; }
-.customers-card-head .selection-actions { margin-left: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; width: min(100%, 540px); gap: 12px; }
+.customers-card-head .selection-actions { margin-left: auto; display: grid; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 172px; align-items: stretch; width: auto; gap: 12px; }
 .customers-card-head .selection-actions .btn { width: 100%; min-width: 0; min-height: 48px; padding: 10px 12px; white-space: normal; }
 .customer-filters { grid-template-columns: minmax(0, 1fr); }
 .customer-select { width: 44px; text-align: center !important; }
@@ -462,7 +462,7 @@ dialog:has(.kpi-detail) { width: min(960px, calc(100% - 32px)); }
   .table-pagination { width: 100%; justify-content: space-between; gap: 8px; }
   .table-pagination .btn { padding-inline: 8px; font-size: var(--text-size); }
   .table-pagination > span { font-size: var(--text-size); }
-  .customers-card-head .selection-actions { width: 100%; margin: 8px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .customers-card-head .selection-actions { width: 100%; margin: 8px 0 0; display: grid; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
   .selection-actions .btn { min-width: 0; min-height: 48px; white-space: normal; font-size: var(--text-size); padding-inline: 8px; }
   .selection-actions .btn svg { width: 16px; height: 16px; }
   .customers-card-head .selection-actions .btn { padding: 8px; }
