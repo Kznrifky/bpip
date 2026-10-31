@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/js/app.js'), 'utf8');
 const context = vm.createContext({state: {documents: []}});
-for (const name of ['needsChecker', 'finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail', 'positionDateRange']) {
+for (const name of ['solFirst', 'customerStageOpen', 'needsChecker', 'finalStatus', 'activeDocuments', 'historyOutcome', 'kpiReviewStatus', 'dashboardCounts', 'renderSolDecision', 'renderDocumentProgress', 'renderDualDocumentProgress', 'renderDualCustomerData', 'customerReviewText', 'bindDocumentRows', 'bindCustomerRows', 'renderCustomerTable', 'renderCustomerDetail', 'positionDateRange']) {
   const start = source.indexOf('function ' + name + '(');
   assert.ok(start >= 0, 'Missing ' + name);
   let cursor = source.indexOf('{', start), depth = 0, end;
@@ -283,4 +283,31 @@ test('Checker and approver KPI queues advance independently',()=>{
  assert.equal(context.kpiReviewStatus('review',waiting),null);
  assert.equal(context.kpiReviewStatus('review',checked),'pending');
  assert.equal(context.kpiReviewStatus('checker',checked),'approved');
+});
+
+test('SOL-first submissions wait at SOL before customers, then advance to AMOL',()=>{
+ const pending={...doc('sol-first','pending','pending'),review_flow:3,checker_status:'pending'};
+ assert.equal(context.finalStatus(pending),'checker');
+ assert.equal(context.kpiReviewStatus('checker',pending),'pending');
+ assert.equal(context.kpiReviewStatus('pending',pending),null);
+ context.state.user={role:'checker'};
+ assert.equal((context.renderSolDecision(pending).match(/<button/g)||[]).length,2);
+ context.state.user={role:'sol'};
+ assert.ok(!context.renderSolDecision(pending).includes('<button'));
+ const checked={...pending,checker_status:'approved'};
+ assert.equal(context.finalStatus(checked),'pending');
+ assert.equal(context.kpiReviewStatus('pending',checked),'pending');
+ assert.equal(context.kpiReviewStatus('review',checked),null);
+ const confirmed={...checked,customer_status:'confirmed'};
+ assert.equal(context.finalStatus(confirmed),'review');
+ assert.equal((context.renderSolDecision(confirmed).match(/<button/g)||[]).length,2);
+ for(const record of [pending,{...pending,verification:{required:2,verifiers:[{position:1,status:'pending'},{position:2,status:'pending'}]}}]){
+  const html=context.renderDocumentProgress(record);
+  const customer=record.verification?'Verifikator 1':'Review nasabah';
+  assert.ok(html.indexOf('Review SOL')<html.indexOf(customer));
+  assert.ok(html.indexOf(customer)<html.indexOf('Review AMOL'));
+  assert.equal((html.match(/aria-current="step"/g)||[]).length,1);
+  const current=html.match(/<li [\s\S]*?<\/li>/g).find(step=>step.includes('aria-current'));
+  assert.ok(current.includes('Review SOL'));
+ }
 });

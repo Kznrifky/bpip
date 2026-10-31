@@ -63,11 +63,15 @@ def build_execution_report(doc, version, audit, maker):
         raise ReportError('PDF tersedia setelah nasabah, SOL, dan AMOL menyetujui pengajuan.')
     if not checked:
         audit = [{**entry, 'action': re.sub(r'\bSOL\b', 'AMOL', entry['action']), 'actor': entry['actor'].replace(' (SOL)', ' (AMOL)')} for entry in audit]
-    maker = next((a['actor'] for a in audit if a['action'] == 'Pengajuan dikirim untuk konfirmasi nasabah'), maker)
+    if doc.get('review_flow', 1) >= 3:
+        maker = next((a['actor'] for a in audit if a['action'].startswith('Dokumen diajukan oleh ')), maker)
+    else:
+        maker = next((a['actor'] for a in audit if a['action'] == 'Pengajuan dikirim untuk konfirmasi nasabah'), maker)
     approvals = [a for a in audit if a['version'] == doc['version']]
     customer = next((a for a in reversed(approvals) if a['action'] == 'Nasabah menyetujui surat'), None)
     sol = next((a for a in reversed(approvals) if a['action'] == 'AMOL menyetujui pengajuan'), None)
-    checker = next((a for a in reversed(approvals) if a['action'] == 'SOL menyetujui pengajuan'), None) if checked else None
+    checker_audit = audit if doc.get('review_flow', 1) >= 3 else approvals
+    checker = next((a for a in reversed(checker_audit) if a['action'] == 'SOL menyetujui pengajuan'), None) if checked else None
     if checked and not checker:
         raise ReportError('Catatan persetujuan SOL belum lengkap.')
     if not customer or not sol:
@@ -187,10 +191,13 @@ def build_execution_report(doc, version, audit, maker):
     amount=f"Rp {doc['nominal']:,}".replace(',','.')
     transaction=[row([('Nominal transaksi',amount,'payment'),('Nama Rekening Tujuan',doc['destination_name'],'person')]),Spacer(1,7),row([('Bank Rekening Tujuan',doc.get('destination_bank'),'payment'),('Rekening tujuan',doc['destination_account'],'payment')]),Spacer(1,7),row([('Keterangan',doc['description'] or '-', 'info')])]
     approval_content=[]
+    if checker and doc.get('review_flow', 1) >= 3:
+        approval_content.extend([row([('SOL','SOL','person'),('Disetujui',timestamp(checker['at']),'check')]),Spacer(1,6)])
+        if checker['notes']: approval_content.extend([para('Catatan SOL: '+checker['notes'],'ReportSmall'),Spacer(1,6)])
     for verifier in identities:
         title='Verifikator '+str(verifier['position']) if len(identities)>1 else 'Verifikator'
         approval_content.extend([row([(title,verifier['name'],'person'),('Disetujui',timestamp(verifier['used_at']),'check')]),Spacer(1,6)])
-    if checker:
+    if checker and doc.get('review_flow', 1) < 3:
         approval_content.extend([row([('SOL','SOL','person'),('Disetujui',timestamp(checker['at']),'check')]),Spacer(1,6)])
         if checker['notes']: approval_content.extend([para('Catatan SOL: '+checker['notes'],'ReportSmall'),Spacer(1,6)])
     approval_content.extend([row([('AMOL','AMOL','person'),('Disetujui',timestamp(sol['at']),'check')]),Spacer(1,8),para('Sebagai pihak berwenang, verifikator telah memeriksa dan menyetujui surat serta nominal transaksi.','ReportSmall')])

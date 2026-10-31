@@ -62,7 +62,13 @@ class LegacyDocumentClient(Client):
         result=super().call(path,data,**options)
         if path=='/documents' and data is not None and result[0]==201:
             with app.database(True) as db:
-                db.execute('UPDATE documents SET review_flow=1 WHERE id=?',(result[1]['id'],))
+                doc_id=result[1]['id']
+                db.execute('UPDATE documents SET review_flow=1 WHERE id=?',(doc_id,))
+                db.execute("DELETE FROM audit WHERE doc_id=? AND action='Pengajuan dikirim untuk verifikasi SOL'", (doc_id,))
+                doc=db.execute('SELECT * FROM documents WHERE id=?',(doc_id,)).fetchone()
+                version=db.execute('SELECT * FROM versions WHERE doc_id=? AND version=1',(doc_id,)).fetchone()
+                preview=app.enqueue(db,doc,tuple(version[key] for key in ('filename','mime','content','sha256')),'Rina Wulandari','','',data.get('channel','email'))
+                result[1]['whatsapp']=preview
         return result
 
 class WorkflowTests(unittest.TestCase):
@@ -328,7 +334,7 @@ class WorkflowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(body))
         self.assertEqual(len(reader.pages),3)  # Two report pages plus the original, no blank cover.
         text='\n'.join(page.extract_text() for page in reader.pages)
-        for expected in ['DOKUMEN KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','AMOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','Bambang Haryanto','Budi Santoso']:
+        for expected in ['DOKUMEN KONFIRMASI PELAKSANAAN','RIWAYAT PERNYATAAN','LOG AKTIVITAS','ORIGINAL SI TEST DOCUMENT','AMOL menyetujui pengajuan','Nasabah menyetujui surat','Rp 250.000.000','000123456789012','PT Tujuan Pembayaran','Rina Wulandari','AMOL','Budi Santoso']:
             self.assertIn(expected,text)
         self.assertNotIn('Pengajuan telah dikonfirmasi seluruh verifikator',text)
         self.assertEqual(reader.attachments['si-original.pdf'][0],original.getvalue())
@@ -368,7 +374,7 @@ class WorkflowTests(unittest.TestCase):
         reader=PdfReader(BytesIO(body))
         self.assertEqual(len(reader.pages),3)
         self.assertEqual(reader.attachments['si.png'][0],image.getvalue())
-        embedded = reader.pages[-1].images[0].image
+        embedded = next(item.image for item in reader.pages[-1].images if item.image.width == 1240)
         self.assertLessEqual(embedded.width, 1240)
         self.assertLessEqual(embedded.height, 1754)
         self.assertEqual(embedded.convert('RGB').getpixel((0,0)), (255,255,255))
@@ -411,7 +417,7 @@ class WorkflowTests(unittest.TestCase):
     def test_delivery_channel_email_whatsapp_and_both(self):
         with app.database(True) as db:
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
-        for channel in ('whatsapp', 'email', 'both'):
+        for channel in ('whatsapp', 'email'):
             with self.subTest(channel=channel):
                 status,result,_=self.maker.call('/documents',{**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE,'channel':channel})
                 self.assertEqual(status,201,result)
@@ -448,7 +454,7 @@ class WorkflowTests(unittest.TestCase):
         doc=self.create()
         with app.database(True) as db:
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
-            db.execute("UPDATE outbox SET created='2020-01-01T00:00:00+00:00' WHERE doc_id=?",(doc,))
+            db.execute('UPDATE versions SET expires=0 WHERE doc_id=?',(doc,))
         old_token=self.token(doc)
         result=self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'whatsapp'})
         self.assertEqual(result[0],200,result[1])
@@ -465,15 +471,17 @@ class WorkflowTests(unittest.TestCase):
     def test_both_channels_lock_current_link_and_resend_resets_selection(self):
         with app.database(True) as db:
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
-        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE,'channel':'both'}
+        payload={**DESTINATION,'cif':'1234567','kind':'Standing Instruction','nominal':1,'file':FILE,'channel':'email'}
         status,result,_=self.maker.call('/documents',payload)
         self.assertEqual(status,201)
         doc=result['id'];token=self.token(doc);route='/documents/'+doc+'/send-confirmation'
+        self.assertEqual(self.maker.call(route,{'version':1,'channel':'whatsapp'})[0],200)
+        self.assertEqual(self.maker.call(route,{'version':1,'channel':'both'})[0],400)
         for _ in range(2):
             self.assertEqual(self.maker.call('/documents/'+doc)[1]['document']['delivery'],{'email_requested':True,'whatsapp_prepared':True})
-        for channel in ('email','whatsapp','both'):
+        for channel in ('email','whatsapp'):
             self.assertEqual(self.maker.call(route,{'version':1,'channel':channel})[0],409)
-        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'both'})[0],429)
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'email'})[0],429)
         self.assertEqual(self.token(doc),token)
         with app.database(True) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM outbox WHERE doc_id=?',(doc,)).fetchone()[0],1)
@@ -597,6 +605,7 @@ class WorkflowTests(unittest.TestCase):
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
             stamp=app.datetime.fromtimestamp(time.time()-90000,app.timezone.utc).isoformat()
             db.execute('UPDATE outbox SET created=?,sent_at=NULL WHERE doc_id=?',(stamp,doc))
+            db.execute('UPDATE versions SET expires=0 WHERE doc_id=?',(doc,))
         self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1})[0],200)
         new_token=self.token(doc)
         status,preview,_=self.maker.call('/documents/'+doc+'/whatsapp-preview')
@@ -869,50 +878,35 @@ class WorkflowTests(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'wrong'})[0],403)
         self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})[0],429)
-    def test_resend_waits_24_hours_and_restarts_after_each_send(self):
-        doc_id = self.create()
-        path = '/documents/' + doc_id
-        original_token = self.token(doc_id)
-        original = self.maker.call(path)[1]['document']
-        self.assertGreater(original['resend_available_at'], time.time() + 86300)
-        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 429)
+    def test_resend_waits_for_expiry_and_restarts_ten_minute_window(self):
+        doc_id=self.create();path='/documents/'+doc_id;original_token=self.token(doc_id)
+        original=self.maker.call(path)[1]['document']
+        self.assertAlmostEqual(original['resend_available_at']-time.time(),600,delta=3)
+        self.assertEqual(self.maker.call(path+'/resend',{'version':1})[0],429)
         with app.database(True) as db:
-            nearly = app.datetime.fromtimestamp(time.time() - 86400 + 60, app.timezone.utc).isoformat()
-            db.execute('UPDATE outbox SET created=? WHERE doc_id=?', (nearly, doc_id))
-        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 429)
-        unchanged = self.maker.call(path)[1]['document']
-        self.assertEqual(unchanged['version'], 1)
-        self.assertEqual(len(unchanged['versions']), 1)
-        self.assertEqual(self.token(doc_id), original_token)
-        with app.database(True) as db:
-            boundary = app.datetime.fromtimestamp(time.time() - 86400, app.timezone.utc).isoformat()
-            db.execute('UPDATE outbox SET created=? WHERE doc_id=?', (boundary, doc_id))
-        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 200)
-        updated = self.maker.call(path)[1]['document']
-        self.assertEqual(updated['version'], 2)
-        self.assertEqual(len(updated['versions']), 2)
-        self.assertNotEqual(self.token(doc_id), original_token)
-        self.assertEqual(self.respond(original_token)[0], 410)
-        self.assertEqual(self.maker.call(path + '/resend', {'version': 2})[0], 429)
-        self.assertEqual(self.maker.call(path + '/cancel', {'version': 2, 'notes': 'Pembatalan oleh petugas'})[0], 410)
+            db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc_id))
+        self.assertEqual(self.maker.call(path+'/resend',{'version':1})[0],200)
+        updated=self.maker.call(path)[1]['document']
+        self.assertEqual(updated['version'],2);self.assertEqual(len(updated['versions']),2)
+        self.assertNotEqual(self.token(doc_id),original_token)
+        self.assertEqual(self.respond(original_token)[0],410)
+        self.assertAlmostEqual(updated['resend_available_at']-time.time(),600,delta=3)
+        self.assertEqual(self.maker.call(path+'/resend',{'version':2})[0],429)
 
-    def test_resend_waits_from_actual_email_delivery(self):
-        doc_id = self.create()
-        path = '/documents/' + doc_id
+    def test_delivery_timestamp_does_not_extend_link_lifetime(self):
+        doc_id=self.create();path='/documents/'+doc_id
+        original=self.maker.call(path)[1]['document']['file']['expires']
         with app.database(True) as db:
-            created = app.datetime.fromtimestamp(time.time() - 172800, app.timezone.utc).isoformat()
-            sent = app.datetime.fromtimestamp(time.time() - 3600, app.timezone.utc).isoformat()
-            db.execute('UPDATE outbox SET created=?,sent_at=? WHERE doc_id=?', (created, sent, doc_id))
-        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 429)
-        with app.database(True) as db:
-            sent = app.datetime.fromtimestamp(time.time() - 86400, app.timezone.utc).isoformat()
-            db.execute('UPDATE outbox SET sent_at=? WHERE doc_id=?', (sent, doc_id))
-        self.assertEqual(self.maker.call(path + '/resend', {'version': 1})[0], 200)
+            db.execute('UPDATE outbox SET sent_at=? WHERE doc_id=?',(app.now(),doc_id))
+        self.assertEqual(self.maker.call(path)[1]['document']['file']['expires'],original)
+        self.assertEqual(self.maker.call(path+'/resend',{'version':1})[0],429)
+        with app.database(True) as db:db.execute('UPDATE versions SET expires=0 WHERE doc_id=?',(doc_id,))
+        self.assertEqual(self.maker.call(path+'/resend',{'version':1})[0],200)
 
     def test_resend_accepts_expired_link_before_24_hours_for_all_channels(self):
         with app.database(True) as db:
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
-        for channel in ('email','whatsapp','both'):
+        for channel in ('email','whatsapp'):
             with self.subTest(channel=channel):
                 doc=self.create();old_token=self.token(doc)
                 self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':channel})[0],429)

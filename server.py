@@ -63,6 +63,7 @@ DESTINATION_BANKS = (
     {'value': 'OCBC', 'label': 'OCBC', 'lengths': [12]},
 )
 SESSION_TTL = 8 * 3600
+TOKEN_TTL_MINUTES = int(os.getenv('TOKEN_TTL_MINUTES', '10'))
 DEMO = False
 EXECUTION_PDF_LOCK = threading.Lock()
 SCHEMA = """
@@ -180,6 +181,9 @@ def initialize():
             db.execute("UPDATE documents SET review_flow=2 WHERE sol_status IN ('pending','revision_requested')")
         if 'verifier_config' not in {row['name'] for row in db.execute('PRAGMA table_info(documents)')}:
             db.execute("ALTER TABLE documents ADD COLUMN verifier_config TEXT NOT NULL DEFAULT ''")
+        for column in ('delivery_channel', 'verification_phone'):
+            if column not in {row['name'] for row in db.execute('PRAGMA table_info(documents)')}:
+                db.execute(f"ALTER TABLE documents ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         for table in ('documents', 'versions'):
             columns = {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
             for column in ('destination_account', 'destination_name', 'destination_bank'):
@@ -354,6 +358,8 @@ def insert_customer(db, values):
 def verification_rows(db, doc):
     rows = [dict(row) for row in db.execute('SELECT position,name,person,email,status,used_at,notes FROM document_verifications WHERE doc_id=? AND version=? ORDER BY position', (doc['id'], doc['version']))]
     config = json.loads(doc['verifier_config']) if doc['verifier_config'] else []
+    if not rows and config:
+        rows = [{'position': position, 'name': verifier['name'], 'person': verifier['person'], 'email': verifier['email'], 'status': 'pending', 'used_at': None, 'notes': ''} for position, verifier in enumerate(config, 1)]
     for row in rows:
         row['phone'] = config[row['position'] - 1].get('phone', '') if row['position'] <= len(config) else ''
     return rows
@@ -392,18 +398,36 @@ def displayed_audit(row, review_flow=1):
 def add_audit(db, doc, action, actor, notes='', ip='', agent=''):
     db.execute('INSERT INTO audit(doc_id,version,action,actor,notes,at,ip,agent) VALUES(?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], action, actor, notes, now(), ip, agent[:300]))
 
+def customer_stage_open(doc):
+    return doc['review_flow'] < 3 or doc['checker_status'] == 'approved'
+
+def validate_delivery(db, doc, channel):
+    require(channel in ('email', 'whatsapp'), 'Pilih Email atau WhatsApp.')
+    config = json.loads(doc['verifier_config']) if doc['verifier_config'] else []
+    if channel == 'whatsapp':
+        require(not config or doc['review_flow'] >= 3, 'Pengajuan lama dengan dua verifikator menggunakan Email.')
+        if config:
+            for verifier in config:
+                valid_phone(verifier.get('phone', ''))
+        else:
+            customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
+            phone = doc['verification_phone'] if doc['review_flow'] >= 3 else customer['phone'] if customer else ''
+            require(bool(phone), 'Nomor HP nasabah belum tersedia. Pilih Email atau lengkapi data melalui persetujuan AMOL.')
+            valid_phone(phone)
+
+def store_version(db, doc, upload, token_hash, expiry):
+    db.execute('INSERT INTO versions(doc_id,version,filename,mime,content,sha256,nominal,token_hash,expires,used_at,created,destination_account,destination_name,destination_bank) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(doc_id,version) DO UPDATE SET token_hash=excluded.token_hash,expires=excluded.expires,used_at=NULL', (doc['id'], doc['version'], *upload, doc['nominal'], token_hash, expiry, None, now(), doc['destination_account'], doc['destination_name'], doc['destination_bank']))
+
 def enqueue(db, doc, upload, actor, ip, agent, channel='email'):
-    require(channel in ('email', 'whatsapp', 'both'), 'Pilih Email, WhatsApp, atau Keduanya.')
+    validate_delivery(db, doc, channel)
+    require(customer_stage_open(doc), 'Tunggu persetujuan SOL sebelum mengirim verifikasi nasabah.', 409)
     dual = bool(doc['verifier_config'])
-    require(not dual or channel == 'email', 'Dua verifikator menerima link pribadi masing-masing melalui Email.')
-    if channel != 'email':
-        customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
-        require(customer is not None and customer['phone'], 'Nomor HP nasabah belum tersedia. Pilih Email atau minta AMOL melengkapi nomor HP.')
-        valid_phone(customer['phone'])
     token = secrets.token_urlsafe(32)
     stamp = now()
-    expiry = time.time() + int(os.getenv('TOKEN_TTL_HOURS', '24')) * 3600
-    db.execute('INSERT INTO versions(doc_id,version,filename,mime,content,sha256,nominal,token_hash,expires,used_at,created,destination_account,destination_name,destination_bank) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (doc['id'], doc['version'], *upload, doc['nominal'], digest(token), expiry, None, stamp, doc['destination_account'], doc['destination_name'], doc['destination_bank']))
+    expiry = time.time() + TOKEN_TTL_MINUTES * 60
+    store_version(db, doc, upload, digest(token), expiry)
+    db.execute('UPDATE documents SET delivery_channel=? WHERE id=?', (channel, doc['id']))
+    doc = db.execute('SELECT * FROM documents WHERE id=?', (doc['id'],)).fetchone()
     if dual:
         previous = {row['position']: row for row in db.execute('SELECT * FROM document_verifications WHERE doc_id=? AND version=?', (doc['id'], doc['version'] - 1))}
         for position, verifier in enumerate(json.loads(doc['verifier_config']), 1):
@@ -415,42 +439,46 @@ def enqueue(db, doc, upload, actor, ip, agent, channel='email'):
             if confirmed:
                 continue
             personal = {**dict(doc), 'person': verifier['person'], 'verifier_name': verifier['name']}
-            body = confirmation_body(personal, f'{BASE_URL}/#confirm/{private_token}', expiry, ttl_hours=int(os.getenv('TOKEN_TTL_HOURS', '24')))
+            body = confirmation_body(personal, f'{BASE_URL}/#confirm/{private_token}', expiry, ttl_minutes=TOKEN_TTL_MINUTES)
             db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)',
-                       (secrets.token_hex(16), doc['id'], doc['version'], verifier['email'], f"BRI VISTA - Verifikasi Transaksi | {doc['id']}", body, 'queued', stamp))
-        add_audit(db, doc, 'Pengajuan dikirim untuk konfirmasi nasabah', actor, 'Kanal: Email · Persetujuan wajib dari kedua verifikator', ip, agent)
-        return None
+                       (secrets.token_hex(16), doc['id'], doc['version'], verifier['email'], f"BRI VISTA - Verifikasi Transaksi | {doc['id']}", body, 'whatsapp_manual' if channel == 'whatsapp' else 'queued', stamp))
+        add_audit(db, doc, 'Konfirmasi WhatsApp disiapkan' if channel == 'whatsapp' else 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Kanal: {'WhatsApp manual' if channel == 'whatsapp' else 'Email'} · Persetujuan wajib dari kedua verifikator", ip, agent)
+        return whatsapp_preview(db, doc) if channel == 'whatsapp' else None
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
     subject = f"BRI VISTA - Verifikasi Transaksi | {doc['id']}"
-    body = confirmation_body(doc, f'{BASE_URL}/#confirm/{token}', expiry, ttl_hours=int(os.getenv('TOKEN_TTL_HOURS', '24')))
+    body = confirmation_body(doc, f'{BASE_URL}/#confirm/{token}', expiry, ttl_minutes=TOKEN_TTL_MINUTES)
     # A manual-only row preserves the private link but is never processed by the email worker.
     db.execute('INSERT INTO outbox(id,doc_id,version,recipient,subject,body,status,created) VALUES(?,?,?,?,?,?,?,?)', (secrets.token_hex(16), doc['id'], doc['version'], doc['email'], subject, body, 'whatsapp_manual' if channel == 'whatsapp' else 'queued', stamp))
-    delivery = {'email': 'Email', 'whatsapp': 'WhatsApp manual', 'both': 'Email dan WhatsApp manual'}[channel]
+    delivery = {'email': 'Email', 'whatsapp': 'WhatsApp manual'}[channel]
     add_audit(db, doc, 'Konfirmasi WhatsApp disiapkan' if channel == 'whatsapp' else 'Pengajuan dikirim untuk konfirmasi nasabah', actor, f"Kanal: {delivery} · {amount}", ip, agent)
     return whatsapp_preview(db, doc) if channel != 'email' else None
 
 def resend_available_at(db, doc):
-    mail = db.execute('SELECT created,sent_at FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
-    stamp = (mail['sent_at'] or mail['created']) if mail else doc['updated']
-    return datetime.fromisoformat(stamp).timestamp() + 24 * 60 * 60
+    version = db.execute('SELECT expires FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
+    return version['expires'] if version else 0
 
 def confirmation_delivery(db, doc):
     if doc['verifier_config']:
-        requested = db.execute('SELECT 1 FROM outbox WHERE doc_id=? AND version=? LIMIT 1', (doc['id'], doc['version'])).fetchone()
+        requested = db.execute("SELECT 1 FROM outbox WHERE doc_id=? AND version=? AND status NOT IN ('whatsapp_manual','cancelled') LIMIT 1", (doc['id'], doc['version'])).fetchone()
+        if doc['review_flow'] >= 3:
+            whatsapp = db.execute("SELECT 1 FROM audit WHERE doc_id=? AND version=? AND action='Konfirmasi WhatsApp disiapkan' LIMIT 1", (doc['id'], doc['version'])).fetchone()
+            return {'email_requested': bool(requested), 'whatsapp_prepared': bool(whatsapp)}
         return {'email_requested': bool(requested), 'whatsapp_prepared': False}
     mail = db.execute('SELECT status FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
     whatsapp = db.execute("SELECT 1 FROM audit WHERE doc_id=? AND version=? AND (action='Konfirmasi WhatsApp disiapkan' OR notes LIKE 'Kanal: Email dan WhatsApp manual%') LIMIT 1", (doc['id'], doc['version'])).fetchone()
     return {'email_requested': bool(mail and mail['status'] not in ('whatsapp_manual', 'cancelled')), 'whatsapp_prepared': bool(whatsapp)}
 
 def send_current_confirmation(db, doc, channel, actor, ip, agent):
-    require(channel in ('email', 'whatsapp', 'both'), 'Pilih Email, WhatsApp, atau Keduanya.')
+    validate_delivery(db, doc, channel)
+    require(customer_stage_open(doc), 'Tunggu persetujuan SOL sebelum mengirim verifikasi nasabah.', 409)
+    require(doc['review_flow'] < 3 or channel == doc['delivery_channel'], 'Metode verifikasi sudah dipilih. Ubah metode saat menerbitkan link baru.', 409)
     require(not doc['verifier_config'], 'Email untuk kedua verifikator sudah disiapkan. Gunakan Kirim ulang jika link kedaluwarsa.', 409)
     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Konfirmasi tersedia saat pengajuan masih menunggu respons nasabah.', 409)
     version = db.execute('SELECT expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     require(version and not version['used_at'] and version['expires'] > time.time(), 'Tautan sudah tidak berlaku. Gunakan Kirim ulang untuk membuat tautan baru.', 409)
     delivery = confirmation_delivery(db, doc)
-    require(channel == 'whatsapp' or not delivery['email_requested'], 'Email sudah diproses untuk link ini. Gunakan Kirim ulang setelah 24 jam atau saat link kedaluwarsa.', 409)
-    require(channel == 'email' or not delivery['whatsapp_prepared'], 'WhatsApp sudah dipilih untuk link ini. Gunakan Kirim ulang setelah 24 jam atau saat link kedaluwarsa.', 409)
+    require(channel == 'whatsapp' or not delivery['email_requested'], 'Email sudah diproses untuk link ini. Gunakan Kirim ulang saat link kedaluwarsa.', 409)
+    require(channel == 'email' or not delivery['whatsapp_prepared'], 'WhatsApp sudah dipilih untuk link ini. Gunakan Kirim ulang saat link kedaluwarsa.', 409)
     preview = whatsapp_preview(db, doc) if channel != 'email' else None
     if channel != 'whatsapp':
         mail = db.execute("SELECT id FROM outbox WHERE doc_id=? AND version=? AND status='whatsapp_manual' ORDER BY created DESC LIMIT 1", (doc['id'], doc['version'])).fetchone()
@@ -463,21 +491,35 @@ def send_current_confirmation(db, doc, channel, actor, ip, agent):
     return preview
 
 def whatsapp_preview(db, doc):
-    require(not doc['verifier_config'], 'Dua verifikator menerima link pribadi masing-masing melalui Email.', 409)
+    require(customer_stage_open(doc), 'Tunggu persetujuan SOL sebelum mengirim verifikasi nasabah.', 409)
+    require(doc['review_flow'] < 3 or doc['delivery_channel'] == 'whatsapp', 'Metode verifikasi pengajuan ini adalah Email.', 409)
     require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'WhatsApp tersedia saat pengajuan masih menunggu respons nasabah.', 409)
     version = db.execute('SELECT token_hash,expires,used_at FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
     require(version is not None and not version['used_at'] and version['expires'] > time.time(), 'Tautan sudah tidak berlaku. Kirim tautan baru terlebih dahulu.', 409)
+    if doc['verifier_config']:
+        require(doc['review_flow'] >= 3, 'Dua verifikator menerima link pribadi masing-masing melalui Email.', 409)
+        previews = []
+        config = json.loads(doc['verifier_config'])
+        for verifier in db.execute("SELECT * FROM document_verifications WHERE doc_id=? AND version=? AND status='pending' ORDER BY position", (doc['id'], doc['version'])):
+            mail = db.execute('SELECT body FROM outbox WHERE doc_id=? AND version=? AND recipient=?', (doc['id'], doc['version'], verifier['email'])).fetchone()
+            previews.append(whatsapp_message(doc, version, config[verifier['position'] - 1]['phone'], mail, verifier['token_hash'], verifier['name']))
+        return previews
     customer = db.execute('SELECT phone FROM customers WHERE cif=? AND NOT EXISTS (SELECT 1 FROM archived_customers a WHERE a.cif=customers.cif)', (doc['cif'],)).fetchone()
+    if doc['review_flow'] >= 3:
+        customer = {'phone': doc['verification_phone']}
     require(customer is not None and customer['phone'], 'Nomor HP nasabah belum tersedia. Minta AMOL melengkapi data nasabah.')
-    phone = valid_phone(customer['phone'])
-    phone = '62' + phone[1:] if phone.startswith('0') else phone.lstrip('+')
     mail = db.execute('SELECT body FROM outbox WHERE doc_id=? AND version=? ORDER BY created DESC LIMIT 1', (doc['id'], doc['version'])).fetchone()
+    return whatsapp_message(doc, version, customer['phone'], mail, version['token_hash'])
+
+def whatsapp_message(doc, version, phone, mail, token_hash, name=''):
+    phone = valid_phone(phone)
+    phone = '62' + phone[1:] if phone.startswith('0') else phone.lstrip('+')
     # Reuse the email's current token; opening this preview never renews a link.
     match = re.search(r'/#confirm/([A-Za-z0-9_-]+)', mail['body']) if mail else None
-    require(match is not None and hmac.compare_digest(digest(match[1]), version['token_hash']), 'Tautan konfirmasi tidak tersedia. Kirim tautan baru terlebih dahulu.', 409)
+    require(match is not None and hmac.compare_digest(digest(match[1]), token_hash), 'Tautan konfirmasi tidak tersedia. Kirim tautan baru terlebih dahulu.', 409)
     link = BASE_URL + '/#confirm/' + match[1]
     expires = datetime.fromtimestamp(version['expires'], timezone(timedelta(hours=7))).strftime('%d/%m/%Y %H:%M')
-    message = f"""Yth. {doc['customer_name']},
+    message = f"""Yth. {name or doc['customer_name']},
 
 Mohon periksa dan konfirmasi surat {doc['id']} melalui tautan berikut:
 {link}
@@ -529,6 +571,7 @@ def portal_document(db, token):
     require(verifier is not None or not doc['verifier_config'], 'Tautan konfirmasi tidak ditemukan.', 404)
     require(not db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (doc['id'],)).fetchone(), 'Pengajuan sudah dihapus dari daftar.', 410)
     require(doc['sol_status'] != 'cancelled', 'Pengajuan telah dibatalkan oleh petugas.', 410)
+    require(customer_stage_open(doc), 'Pengajuan belum disetujui SOL.', 409)
     require(doc['version'] == version['version'], 'Surat telah direvisi. Gunakan tautan dari email terbaru.', 410)
     if verifier:
         require(not verifier['used_at'], 'Keputusan Anda sudah tercatat. Tautan ini telah digunakan.', 410)
@@ -568,7 +611,7 @@ def deliver_one():
         doc = db.execute('SELECT * FROM documents WHERE id=?', (row['doc_id'],)).fetchone()
         version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (row['doc_id'], row['version'])).fetchone()
         verifier = db.execute('SELECT status FROM document_verifications WHERE doc_id=? AND version=? AND email=?', (row['doc_id'], row['version'], row['recipient'])).fetchone()
-        if not doc or db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (row['doc_id'],)).fetchone() or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time() or (verifier and verifier['status'] != 'pending'):
+        if not doc or not customer_stage_open(doc) or (doc['review_flow'] >= 2 and doc['checker_status'] == 'rejected') or db.execute('SELECT 1 FROM archived_documents WHERE doc_id=?', (row['doc_id'],)).fetchone() or doc['sol_status'] == 'cancelled' or doc['version'] != row['version'] or version['used_at'] or version['expires'] <= time.time() or (verifier and verifier['status'] != 'pending'):
             db.execute("UPDATE outbox SET status='cancelled' WHERE id=?", (row['id'],))
             return True
         db.execute("UPDATE outbox SET status='sending', attempts=attempts+1, next_attempt=? WHERE id=?", (time.time() + 120, row['id']))
@@ -697,7 +740,7 @@ class Handler(BaseHTTPRequestHandler):
             with database() as db:
                 user = self.session(db)
                 require(not re.match(r'^/api/(?:officers|officer-account-requests|officer-change-requests)(?:/|$)', path), 'Fitur pengelolaan akun tidak tersedia.', 404)
-                require(user['role'] != 'checker' or (path in ('/api/documents', '/api/customers', '/api/customer-edit-requests') or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file|/execution-pdf)?', path)), 'SOL hanya dapat memeriksa pengajuan dan mengajukan perubahan data nasabah.', 403)
+                require(user['role'] != 'checker' or (path in ('/api/documents', '/api/customers', '/api/customer-edit-requests') or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file|/execution-pdf|/whatsapp-preview)?', path)), 'SOL hanya dapat memeriksa pengajuan dan mengajukan perubahan data nasabah.', 403)
                 require(user['role'] != 'boh' or (path == '/api/documents' or re.fullmatch(r'/api/documents/[^/]+(?:/file|/versions/[0-9]+/file)?', path)), 'BOH hanya dapat melihat KPI, tracking, detail surat, dan history pengajuan.', 403)
                 if path == '/api/customer-edit-requests':
                     require(user['role'] in ('sol', 'checker'), 'Hanya SOL dan AMOL yang dapat melihat pembaruan nasabah.', 403)
@@ -745,8 +788,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 whatsapp = re.fullmatch(r'/api/documents/([^/]+)/whatsapp-preview', path)
                 if whatsapp:
-                    require(user['role'] == 'petugas', 'Hanya Officer yang dapat menyiapkan pesan WhatsApp.', 403)
+                    require(user['role'] in ('petugas','checker'), 'Hanya Officer atau SOL yang dapat menyiapkan pesan WhatsApp.', 403)
                     doc = owned_document(db, whatsapp[1], user)
+                    require(user['role'] != 'checker' or doc['review_flow'] >= 3, 'Pengajuan ini menggunakan alur sebelumnya.', 403)
                     return self.respond(whatsapp_preview(db, doc))
                 historic = re.fullmatch(r'/api/documents/([^/]+)/versions/([0-9]+)/file', path)
                 if historic:
@@ -762,7 +806,7 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_file(version)
                     result = document_summary(db, doc)
                     customer = db.execute('SELECT phone FROM customers WHERE cif=?', (doc['cif'],)).fetchone()
-                    result['phone'] = customer['phone'] if customer else ''
+                    result['phone'] = doc['verification_phone'] if doc['review_flow'] >= 3 else customer['phone'] if customer else ''
                     result['audit'] = [displayed_audit(r, doc['review_flow']) for r in db.execute('SELECT * FROM audit WHERE doc_id=? ORDER BY id DESC', (doc['id'],))]
                     result['versions'] = [dict(r) for r in db.execute('SELECT version,filename,sha256,nominal,created,destination_account,destination_name,destination_bank FROM versions WHERE doc_id=? ORDER BY version DESC', (doc['id'],))]
                     return self.respond({'document': result})
@@ -852,7 +896,7 @@ class Handler(BaseHTTPRequestHandler):
                     add_audit(db, doc, 'Nasabah menyetujui surat' if decision == 'confirmed' else 'Nasabah menolak surat', actor, notes + f" · Nominal Rp {doc['nominal']:,} · Pernyataan diperiksa dan disetujui", ip, agent)
                     db.commit()
                     return self.respond({'message': 'Keputusan Anda berhasil dicatat.', 'decision': decision, 'customer_status': aggregate, 'verification': {'required': 2 if verifier else 1, 'confirmed': verification_progress(db, doc)['confirmed'] if verifier else int(aggregate == 'confirmed')}})
-                public_doc = {key: doc[key] for key in ('id', 'customer_name', 'person', 'kind', 'nominal', 'description', 'destination_account', 'destination_name', 'destination_bank', 'version', 'created')}
+                public_doc = {key: doc[key] for key in ('id', 'customer_name', 'person', 'kind', 'nominal', 'description', 'destination_account', 'destination_name', 'destination_bank', 'version', 'created', 'review_flow')}
                 if verifier:
                     public_doc['person'] = verifier['person']
                 return self.respond({'document': public_doc, 'file': {'filename': version['filename'], 'mime': version['mime'], 'sha256': version['sha256']}, 'expires': version['expires'], 'verifier': {'name': verifier['name'], 'position': verifier['position']} if verifier else None, 'verification_required': 2 if verifier else 1})
@@ -1021,15 +1065,19 @@ class Handler(BaseHTTPRequestHandler):
                 stamp = now()
                 values = (doc_id, customer['cif'], customer['name'], customer['account'], customer['person'], customer['email'], kind, nominal, description, user['id'], 1, 'pending', 'pending', '', stamp, stamp, destination_account, destination_name, destination_bank)
                 db.execute('INSERT INTO documents(id,cif,customer_name,account,person,email,kind,nominal,description,maker,version,customer_status,sol_status,sol_notes,created,updated,destination_account,destination_name,destination_bank) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
-                db.execute('UPDATE documents SET review_flow=2 WHERE id=?', (doc_id,))
+                channel = data.get('channel', 'email')
+                require(channel in ('email', 'whatsapp'), 'Pilih Email atau WhatsApp.')
+                db.execute('UPDATE documents SET review_flow=3,delivery_channel=?,verification_phone=? WHERE id=?', (channel, customer['phone'], doc_id))
                 if customer['verification_count'] == 2:
                     config = [{'name': customer['verifier_name'], 'person': customer['person'], 'email': customer['email'], 'phone': customer['phone']}, {'name': customer['second_name'], 'person': customer['second_person'], 'email': customer['second_email'], 'phone': customer['second_phone']}]
                     db.execute('UPDATE documents SET verifier_config=? WHERE id=?', (json.dumps(config), doc_id))
                 doc = db.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
+                validate_delivery(db, doc, channel)
                 add_audit(db, doc, 'Dokumen diajukan oleh ' + user['name'], user['name'], '', ip, agent)
-                preview = enqueue(db, doc, upload, user['name'], ip, agent, data.get('channel', 'email'))
+                store_version(db, doc, upload, digest(secrets.token_urlsafe(32)), 0)
+                add_audit(db, doc, 'Pengajuan dikirim untuk verifikasi SOL', user['name'], 'Metode verifikasi nasabah: ' + ('WhatsApp' if channel == 'whatsapp' else 'Email'), ip, agent)
                 db.commit()
-                return self.respond({'id': doc_id, 'whatsapp': preview}, 201)
+                return self.respond({'id': doc_id, 'whatsapp': None}, 201)
             match = re.fullmatch(r'/api/documents/([^/]+)/(checker-review|review|revise|resend|send-confirmation|cancel|archive)', path)
             require(match is not None, 'Endpoint tidak ditemukan.', 404)
             doc = owned_document(db, match[1], user)
@@ -1038,7 +1086,7 @@ class Handler(BaseHTTPRequestHandler):
                 require(user['role'] == 'checker', 'Hanya SOL yang dapat memutuskan pemeriksaan.', 403)
                 require(doc['review_flow'] >= 2, 'Pengajuan ini menggunakan alur sebelumnya.', 409)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
-                require(doc['customer_status'] == 'confirmed', 'Tunggu persetujuan seluruh verifikator nasabah.', 409)
+                require(doc['customer_status'] == ('pending' if doc['review_flow'] >= 3 else 'confirmed'), 'Pengajuan tidak tersedia untuk pemeriksaan SOL.' if doc['review_flow'] >= 3 else 'Tunggu persetujuan seluruh verifikator nasabah.', 409)
                 require(doc['checker_status'] == 'pending' and doc['sol_status'] in ('pending','revision_requested'), 'Pemeriksaan SOL sudah diputuskan.', 409)
                 require(user['id'] != doc['maker'], 'Pembuat tidak dapat memeriksa pengajuannya sendiri.', 403)
                 decision = data.get('decision')
@@ -1046,6 +1094,12 @@ class Handler(BaseHTTPRequestHandler):
                 notes = text_field(data, 'notes', 1500, decision == 'rejected')
                 db.execute('UPDATE documents SET checker_status=?,checker_notes=?,checker_by=?,checker_at=?,updated=? WHERE id=?', (decision, notes, user['id'], now(), now(), doc['id']))
                 add_audit(db, doc, 'SOL ' + ('menyetujui' if decision == 'approved' else 'menolak') + ' pengajuan', user['name']+' (SOL)', notes, ip, agent)
+                if doc['review_flow'] >= 3 and decision == 'approved':
+                    doc = db.execute('SELECT * FROM documents WHERE id=?', (doc['id'],)).fetchone()
+                    version = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
+                    preview = enqueue(db, doc, tuple(version[key] for key in ('filename','mime','content','sha256')), user['name']+' (SOL)', ip, agent, doc['delivery_channel'])
+                    db.commit()
+                    return self.respond({'ok': True, 'id': doc['id'], 'whatsapp': preview})
             elif operation == 'send-confirmation':
                 require(user['role'] == 'petugas' and doc['maker'] == user['id'], 'Hanya petugas pembuat yang dapat mengirim konfirmasi.', 403)
                 require(data.get('version') == doc['version'], 'Versi surat telah berubah. Muat ulang pengajuan.', 409)
@@ -1078,8 +1132,9 @@ class Handler(BaseHTTPRequestHandler):
                 if operation == 'revise':
                     raise AppError(410, 'Revisi surat sudah dinonaktifkan. AMOL hanya dapat menyetujui atau menolak pengajuan.')
                 require(doc['customer_status'] == 'pending' and doc['sol_status'] == 'pending', 'Tautan baru hanya dapat dibuat saat menunggu nasabah.', 409)
+                require(customer_stage_open(doc), 'Tunggu persetujuan SOL sebelum menerbitkan tautan nasabah.', 409)
                 previous = db.execute('SELECT * FROM versions WHERE doc_id=? AND version=?', (doc['id'], doc['version'])).fetchone()
-                require(time.time() >= resend_available_at(db, doc) or previous['expires'] <= time.time(), 'Kirim ulang tersedia setelah 24 jam atau saat tautan sudah kedaluwarsa.', 429)
+                require(previous['expires'] <= time.time(), 'Kirim ulang tersedia saat tautan sudah kedaluwarsa.', 429)
                 upload = (previous['filename'], previous['mime'], previous['content'], previous['sha256'])
                 notes = 'Tautan sebelumnya dibatalkan. Tautan konfirmasi baru diterbitkan.'
                 db.execute('UPDATE documents SET version=version+1,updated=? WHERE id=?', (now(), doc['id']))
@@ -1110,7 +1165,7 @@ def validate_config():
     require(MAIL_MODE in ('console', 'smtp'), 'MAIL_MODE harus console atau smtp.')
     parsed = urlsplit(BASE_URL)
     require(parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.path and not parsed.query and not parsed.fragment, 'PUBLIC_BASE_URL harus origin tanpa path.')
-    require(int(os.getenv('TOKEN_TTL_HOURS', '24')) in range(1, 169), 'Masa berlaku token 1–168 jam.')
+    require(1 <= TOKEN_TTL_MINUTES <= 60, 'Masa berlaku token 1–60 menit.')
     if MAIL_MODE == 'smtp':
         require(bool(os.getenv('SMTP_HOST')) and bool(os.getenv('SMTP_FROM') or os.getenv('SMTP_USER')), 'SMTP_HOST dan alamat pengirim (SMTP_USER atau SMTP_FROM) wajib diisi.')
         require(os.getenv('SMTP_TLS', 'starttls') in ('starttls', 'ssl'), 'SMTP wajib menggunakan starttls atau ssl.')

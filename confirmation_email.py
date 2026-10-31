@@ -13,7 +13,7 @@ def expiry_label(expires):
     return f'{stamp.day} {MONTHS[stamp.month - 1]} {stamp.year} pukul {stamp:%H.%M} WIB'
 
 
-def confirmation_body(doc, link, expires, ttl_hours=24):
+def confirmation_body(doc, link, expires, ttl_minutes=10):
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
     values = {key: ' '.join(str(doc[key] or 'Belum tercatat').splitlines()) for key in ('customer_name', 'id', 'kind', 'destination_account', 'destination_name')}
     bank_line = ('Bank Rekening Tujuan: ' + str(doc['destination_bank']) + '\n') if 'destination_bank' in doc.keys() and doc['destination_bank'] else ''
@@ -39,7 +39,7 @@ Verifikasi Transaksi:
 Berlaku hingga: {expiry_label(expires)}
 
 Informasi keamanan:
-- Link verifikasi berlaku selama {ttl_hours} jam sejak pengajuan dikirim.
+- Link verifikasi berlaku selama {ttl_minutes} menit sejak link diterbitkan.
 - Link verifikasi hanya dapat digunakan satu kali untuk memberikan keputusan.
 - Membuka link verifikasi tidak secara otomatis memberikan persetujuan.
 - Jaga kerahasiaan link verifikasi ini dan jangan membagikannya kepada pihak lain.
@@ -99,7 +99,7 @@ def render_confirmation_html(body, base_url):
         point = legacy_points.get(point, point)
         point = re.sub(r'^Tautan berlaku (\d+) jam sejak pengajuan dikirim\.$', r'Link verifikasi berlaku selama \1 jam sejak pengajuan dikirim.', point)
         formatted = escape(point)
-        formatted = re.sub(r'(?<=selama )(\d+ jam)', r'<strong>\1</strong>', formatted, count=1)
+        formatted = re.sub(r'(?<=selama )(\d+ (?:jam|menit))', r'<strong>\1</strong>', formatted, count=1)
         for phrase in ('satu kali untuk memberikan keputusan', 'tidak secara otomatis memberikan persetujuan', 'jangan membagikannya kepada pihak lain'):
             formatted = formatted.replace(phrase, '<strong>' + phrase + '</strong>')
         security_items.append(f'<li style="margin:0 0 10px;padding-left:2px">{formatted}</li>')

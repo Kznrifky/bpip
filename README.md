@@ -32,7 +32,7 @@ Data tersimpan pada `data/bpip.sqlite3` dan bertahan saat server dimatikan. Akun
 ## Perilaku aplikasi
 
 - Semua Officer melihat daftar pengajuan dan history bersama. Nama pengaju ditampilkan di halaman detail; daftar tetap ringkas tanpa kolom Pengaju. Hanya Officer pembuat yang dapat mengirim konfirmasi dan menerbitkan ulang link pengajuannya. Officer, AMOL, dan BOH membuka detail dengan klik baris pengajuan. BOH membaca detail dan surat tanpa tindakan operasional. Pembatasan tindakan diberlakukan oleh backend.
-- Nasabah tidak membutuhkan akun web; akses melalui token acak 256 bit, berumur 24 jam dan sekali keputusan. Pembukaan email/tautan tidak memberikan persetujuan otomatis.
+- Nasabah tidak membutuhkan akun web; akses melalui token acak 256 bit, berumur 10 menit sejak diterbitkan setelah persetujuan SOL dan sekali keputusan. Pembukaan email/tautan tidak memberikan persetujuan otomatis.
 - Dashboard dan Pengajuan hanya menampilkan pengajuan yang masih diproses. Persetujuan nasabah dan AMOL masuk History sebagai Berhasil; penolakan salah satunya masuk sebagai Ditolak. Pengajuan lama yang dibatalkan tetap tersimpan dalam kelompok Ditolak; filter pembatalan tidak tersedia. Standing Instruction dan Warkat mengikuti aturan yang sama; angka KPI dan antrean hanya menghitung pengajuan aktif. Data, surat, dan audit tetap tersimpan.
 - Konfirmasi nasabah dan keputusan AMOL merupakan dua status yang berbeda. Nasabah setuju belum berarti pengajuan telah disetujui AMOL.
 - AMOL hanya dapat menyetujui atau menolak setelah nasabah menyetujui surat. Penolakan nasabah langsung masuk History dan menghentikan alur persetujuan. Backend tetap mengizinkan AMOL mencatat penolakan penutup pada data lama yang ditolak nasabah.
@@ -94,7 +94,9 @@ Gunakan `--role sol` untuk AMOL atau `--role boh` untuk BOH. Perintah meminta em
 
 ### Pemeriksaan SOL sebelum approval AMOL
 
-Pengajuan baru mengikuti Officer → Verifikator Nasabah (1 atau 2 orang) → SOL checker → AMOL. Seluruh verifikator harus menyetujui sebelum SOL bisa memutuskan. AMOL baru dapat menyetujui atau menolak setelah SOL menyetujui. Penolakan pada salah satu tahap menghentikan pengajuan; alasan wajib diisi saat menolak. Checker tidak memiliki fitur Data Nasabah, Update Data, pengajuan surat, atau penghapusan. Seluruh fitur administratif AMOL sebelumnya tetap berada pada role internal `sol`.
+Pengajuan baru mengikuti Teller/CS → SOL → Verifikator Nasabah (1 atau 2 orang) → AMOL. Saat Teller/CS mengajukan, file disimpan untuk pemeriksaan SOL dan belum ada link nasabah atau email keluar. SOL dapat menyetujui atau menolak. Setelah SOL menyetujui, link pribadi diterbitkan melalui metode yang dipilih Teller/CS: **Email** atau **WhatsApp**. Pilihan Keduanya tidak tersedia. Email masuk antrean sistem; WhatsApp disiapkan untuk dikirim manual lewat WhatsApp Web/aplikasi. Untuk dua verifikator, setiap orang menerima link berbeda dan keduanya wajib menyetujui sebelum AMOL dapat memutuskan. Penolakan pada salah satu tahap menghentikan pengajuan.
+
+Link baru berlaku **10 menit sejak diterbitkan**, termasuk setelah kirim ulang. Membuka halaman atau mengirim ulang pesan dengan link yang sama tidak memperpanjang masa berlakunya. Teller/CS pembuat dapat menerbitkan link baru setelah kedaluwarsa; link sebelumnya dinonaktifkan dan persetujuan SOL tetap tercatat. Konfigurasi memakai `TOKEN_TTL_MINUTES=10`; konfigurasi lama `TOKEN_TTL_HOURS` tidak digunakan lagi. Pengajuan lama tetap memakai urutan historisnya (ditandai `review_flow` 1 atau 2); pengajuan baru memakai alur SOL terlebih dahulu (`review_flow=3`).
 
 Startup menambahkan status pemeriksaan dan menaikkan pengajuan lama yang masih aktif ke alur baru. Surat yang sudah selesai tetap menggunakan riwayat alur sebelumnya; keputusan lama tidak diubah. PDF untuk alur baru wajib memuat persetujuan nasabah, SOL, dan AMOL dengan pelaku serta waktunya masing-masing.
 
@@ -167,7 +169,7 @@ Data nasabah diperbarui secara atomik setelah persetujuan AMOL. Satu nasabah han
 
 Permintaan dan audit lama tetap tersimpan tanpa persetujuan otomatis atau penggantian identitas pengaju. BOH hanya memiliki menu Dashboard dan History, tanpa akses perubahan data nasabah atau approval. Perubahan role dan akun produksi tidak dijalankan otomatis.
 
-Pengiriman konfirmasi dicatat per link: Email dan WhatsApp yang sudah dipilih tidak dapat dipilih lagi untuk link yang sama, termasuk setelah halaman dimuat ulang. Memilih Keduanya mengunci kedua pilihan setelah diproses; WhatsApp tetap dikirim manual dari pratinjau, sehingga status pilihan bukan laporan pengiriman dari WhatsApp. Kanal yang belum dipilih dapat menggunakan link yang masih aktif tanpa membuat versi baru. Kirim ulang menerbitkan link baru setelah 24 jam atau ketika link lama kedaluwarsa.
+Pengiriman konfirmasi dicatat per link. Untuk pengajuan baru, metode Email atau WhatsApp dipilih saat mengajukan ke SOL dan digunakan setelah SOL menyetujui. Metode dapat dipilih kembali saat menerbitkan link baru setelah kedaluwarsa. WhatsApp tetap dikirim manual; membuka pratinjau tidak mengirim pesan dan tidak memperpanjang waktu link.
 
 
 ### Username akun Officer

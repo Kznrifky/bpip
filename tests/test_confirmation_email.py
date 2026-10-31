@@ -29,7 +29,7 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertIn('Rekening tujuan: 000123456789012', body)
         html = render_confirmation_html(body, 'https://bpip.example.test')
         self.assertIn('14 Okt 2026 pukul 01.15 WIB', body)
-        self.assertIn('Link verifikasi berlaku selama 24 jam sejak pengajuan dikirim.', body)
+        self.assertIn('Link verifikasi berlaku selama 10 menit sejak link diterbitkan.', body)
         self.assertIn('000123456789012', html)
         self.assertIn('PT Contoh &amp; Mitra', html)
         self.assertIn('PT Penerima &lt;Contoh&gt;', html)
@@ -40,10 +40,10 @@ class ConfirmationEmailTests(unittest.TestCase):
         self.assertLess(html.index('>BRI VISTA</strong>'), html.index('<h1 '))
 
     def test_security_duration_follows_configuration(self):
-        body = confirmation_body(self.doc, self.link, self.expires, ttl_hours=12)
+        body = confirmation_body(self.doc, self.link, self.expires, ttl_minutes=5)
         html = render_confirmation_html(body, 'https://bpip.example.test')
-        self.assertIn('Link verifikasi berlaku selama 12 jam sejak pengajuan dikirim.', body)
-        self.assertIn('<strong>12 jam</strong>', html)
+        self.assertIn('Link verifikasi berlaku selama 5 menit sejak link diterbitkan.', body)
+        self.assertIn('<strong>5 menit</strong>', html)
         self.assertNotIn('24 jam', html)
 
     def test_destination_bank_in_email_and_legacy_body_without_bank(self):

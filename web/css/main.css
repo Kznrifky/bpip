@@ -367,7 +367,7 @@ dialog::backdrop { background: #10223f70; }
 .whatsapp-message { min-height: 220px; resize: vertical; }
 .delivery-picker { border: 0; padding: 0; margin: 0; min-width: 0; }
 .delivery-picker legend { font-weight: 600; margin-bottom: 12px; }
-.delivery-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.delivery-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .delivery-option { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; position: relative; min-height: 100px; padding: 12px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .delivery-option svg { width: 22px; height: 22px; }
 .delivery-option input { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; accent-color: var(--green); }

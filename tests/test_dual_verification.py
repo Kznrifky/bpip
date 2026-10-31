@@ -114,7 +114,7 @@ class DualVerificationTests(unittest.TestCase):
         for changes in ({'verification_count':3}, {'verification_count':'2'}, {'second_email':base['email']}, {'second_email':'INVALID'}, {'second_name':''}, {'verifier_name':''}, {'second_person':''}, {'second_phone':''}, {'second_phone':'abc'}):
             status, _, _ = self.checker.call('/customer-create-requests', {**base, 'cif':'9998887', **changes})
             self.assertEqual(status, 400, changes)
-        for channel in ('whatsapp','both'):
+        for channel in ('both',):
             status, _, _ = self.maker.call('/documents', {**DESTINATION,'cif':base['cif'],'kind':'Standing Instruction','nominal':1,'file':FILE,'channel':channel})
             self.assertEqual(status, 400)
         doc = self.dual_document(); links = self.links(doc)

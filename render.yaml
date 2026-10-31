@@ -30,8 +30,8 @@ services:
         value: "587"
       - key: SMTP_TLS
         value: starttls
-      - key: TOKEN_TTL_HOURS
-        value: "24"
+      - key: TOKEN_TTL_MINUTES
+        value: "10"
       - key: BANK_NAME
         value: BPIP Document Confirmation
       - key: BOOTSTRAP_USERS

@@ -1,9 +1,10 @@
-"""New submissions require distinct SOL checking and final AMOL approval."""
+"""Historical customer-first submissions retain separate SOL and AMOL approval."""
 import concurrent.futures
 from io import BytesIO
 import base64
 import json
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from reportlab.pdfgen import canvas
 from pypdf import PdfReader
@@ -32,7 +33,15 @@ class CheckerFlowTests(unittest.TestCase):
             file={'name':'original.pdf','base64':base64.b64encode(stream.getvalue()).decode()}
         status,result,_=self.maker.call('/documents',{**workflow.DESTINATION,'cif':cif,'kind':'Standing Instruction','nominal':250000,'file':file})
         self.assertEqual(status,201,result)
-        return result['id']
+        doc_id=result['id']
+        # Persist a historical flow-2 fixture; production submissions now use flow 3.
+        with app.database(True) as db:
+            db.execute('UPDATE documents SET review_flow=2 WHERE id=?',(doc_id,))
+            db.execute("DELETE FROM audit WHERE doc_id=? AND action='Pengajuan dikirim untuk verifikasi SOL'",(doc_id,))
+            doc=db.execute('SELECT * FROM documents WHERE id=?',(doc_id,)).fetchone()
+            version=db.execute('SELECT * FROM versions WHERE doc_id=? AND version=1',(doc_id,)).fetchone()
+            app.enqueue(db,doc,tuple(version[key] for key in ('filename','mime','content','sha256')),'Rina Wulandari','','','email')
+        return doc_id
     def detail(self,doc):return self.maker.call('/documents/'+doc)[1]['document']
     def tokens(self,doc):
         with app.database() as db:
@@ -100,12 +109,15 @@ class CheckerFlowTests(unittest.TestCase):
         self.assertEqual(sorted(results),[200,409])
         self.assertEqual(sum(a['action']=='SOL menyetujui pengajuan' for a in self.detail(doc)['audit']),1)
     def test_new_pdf_preserves_separate_sol_and_amol_approvals(self):
-        doc=self.create(dual=True,real_pdf=True);self.confirm(doc);self.review(doc,checker=True);self.review(doc)
+        doc=self.create(dual=True,real_pdf=True)
+        with patch.object(app, 'MAIL_MODE', 'smtp'), patch.dict(app.os.environ, {'SMTP_HOST':'smtp.example.test','SMTP_FROM':'noreply@example.test','SMTP_USER':''}), patch.object(app.smtplib, 'SMTP'):
+            self.assertTrue(app.deliver_one());self.assertTrue(app.deliver_one())
+        self.confirm(doc);self.review(doc,checker=True);self.review(doc)
         status,pdf,_=self.maker.call('/documents/'+doc+'/execution-pdf');self.assertEqual(status,200)
         reader=PdfReader(BytesIO(pdf));text='\n'.join(page.extract_text() for page in reader.pages)
         self.assertGreater(len(reader.pages[0].images),0)
         self.assertGreater(len(reader.pages[1].images),0)
-        for expected in ('DOKUMEN KONFIRMASI PELAKSANAAN','SOL menyetujui pengajuan','AMOL menyetujui pengajuan','SOL Checker','Bambang Haryanto','First Director','Second Director','ORIGINAL SI CHECKER FLOW'):
+        for expected in ('DOKUMEN KONFIRMASI PELAKSANAAN','SOL menyetujui pengajuan','AMOL menyetujui pengajuan','SOL','AMOL','First Director','Second Director','ORIGINAL SI CHECKER FLOW'):
             self.assertIn(expected,text)
         self.assertNotIn('Pengajuan telah dikonfirmasi seluruh verifikator',text)
         approvals=text.split('RIWAYAT PERNYATAAN DAN PERSETUJUAN',1)[1].split('LOG AKTIVITAS',1)[0]

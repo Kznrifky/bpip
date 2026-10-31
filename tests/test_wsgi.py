@@ -43,6 +43,12 @@ class WSGITransportTests(unittest.TestCase):
         self.assertEqual(response['status'],201)
         doc_id=json.loads(response['body'])['id']
         with server.database() as db:
+            self.assertIsNone(db.execute('SELECT body FROM outbox WHERE doc_id=?',(doc_id,)).fetchone())
+        reviewer=self.request('/api/login', {'email':'sol@example.test','password':'SolCheckerDemo!2026'})
+        reviewer_csrf=json.loads(reviewer['body'])['csrf']
+        reviewer_cookie=reviewer['headers']['Set-Cookie'].split(';')[0]
+        self.assertEqual(self.request('/api/documents/'+doc_id+'/checker-review',{'version':1,'decision':'approved'},reviewer_cookie,reviewer_csrf)['status'],200)
+        with server.database() as db:
             token=db.execute('SELECT body FROM outbox WHERE doc_id=?',(doc_id,)).fetchone()['body'].split('/#confirm/')[1].split()[0]
         self.assertEqual(self.request('/api/portal',{'token':token})['status'],200)
         response=self.request('/api/portal/decision',{'token':token,'decision':'confirmed','acknowledged':True})
