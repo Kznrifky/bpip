@@ -59,7 +59,22 @@ class LegacyDocumentClient(Client):
     New checker-flow tests use the plain Client and assert the new default.
     """
     def call(self, path, data=None, **options):
-        result=super().call(path,data,**options)
+        payload=data
+        if path=='/documents' and data is not None:
+            payload={key:value for key,value in data.items() if key!='channel'}
+            channel=data.get('channel','email')
+            try:
+                with app.database() as db:
+                    customer=db.execute('SELECT * FROM customers WHERE cif=?',(data.get('cif'),)).fetchone()
+                    if customer is not None:
+                        fixture={'cif':customer['cif'],'review_flow':1,'verification_phone':'','verifier_config':'legacy-dual' if customer['verification_count']==2 else ''}
+                        if fixture['verifier_config'] and channel=='whatsapp':
+                            raise app.AppError(400,'Pengajuan lama dengan dua verifikator menggunakan Email.')
+                        fixture['verifier_config']=''
+                        app.validate_delivery(db,fixture,channel)
+            except app.AppError as error:
+                return error.status,{'error':error.message},{}
+        result=super().call(path,payload,**options)
         if path=='/documents' and data is not None and result[0]==201:
             with app.database(True) as db:
                 doc_id=result[1]['id']
@@ -878,10 +893,10 @@ class WorkflowTests(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'wrong'})[0],403)
         self.assertEqual(self.sol.call('/documents/'+doc+'/archive',{'version':1,'password':'SolDemo!2026'})[0],429)
-    def test_resend_waits_for_expiry_and_restarts_ten_minute_window(self):
+    def test_resend_waits_for_expiry_and_restarts_five_minute_window(self):
         doc_id=self.create();path='/documents/'+doc_id;original_token=self.token(doc_id)
         original=self.maker.call(path)[1]['document']
-        self.assertAlmostEqual(original['resend_available_at']-time.time(),600,delta=3)
+        self.assertAlmostEqual(original['resend_available_at']-time.time(),300,delta=3)
         self.assertEqual(self.maker.call(path+'/resend',{'version':1})[0],429)
         with app.database(True) as db:
             db.execute('UPDATE versions SET expires=? WHERE doc_id=?',(time.time()-1,doc_id))
@@ -890,7 +905,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(updated['version'],2);self.assertEqual(len(updated['versions']),2)
         self.assertNotEqual(self.token(doc_id),original_token)
         self.assertEqual(self.respond(original_token)[0],410)
-        self.assertAlmostEqual(updated['resend_available_at']-time.time(),600,delta=3)
+        self.assertAlmostEqual(updated['resend_available_at']-time.time(),300,delta=3)
         self.assertEqual(self.maker.call(path+'/resend',{'version':2})[0],429)
 
     def test_delivery_timestamp_does_not_extend_link_lifetime(self):

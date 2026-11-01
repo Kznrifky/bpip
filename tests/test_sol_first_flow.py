@@ -20,6 +20,7 @@ class SolFirstFlowTests(unittest.TestCase):
         workflow.WorkflowTests.setUp(self)
         self.maker = Client(self.url)
         self.maker.login('petugas')
+        self.choices={}
         with app.database(True) as db:
             db.execute("UPDATE customers SET phone='081234567890' WHERE cif='1234567'")
 
@@ -32,9 +33,10 @@ class SolFirstFlowTests(unittest.TestCase):
             stream = BytesIO(); sheet = canvas.Canvas(stream)
             sheet.drawString(50, 750, 'ORIGINAL SOL FIRST'); sheet.save()
             file = {'name': 'original.pdf', 'base64': base64.b64encode(stream.getvalue()).decode()}
-        status, result, _ = self.maker.call('/documents', {**workflow.DESTINATION, 'cif': '1234567', 'kind': 'Standing Instruction', 'nominal': 250000, 'file': file, 'channel': channel})
+        status, result, _ = self.maker.call('/documents', {**workflow.DESTINATION, 'cif': '1234567', 'kind': 'Standing Instruction', 'nominal': 250000, 'file': file})
         self.assertEqual(status, 201, result)
         self.assertIsNone(result['whatsapp'])
+        self.choices[result['id']]=channel
         return result['id']
 
     def detail(self, doc):
@@ -43,6 +45,13 @@ class SolFirstFlowTests(unittest.TestCase):
     def review(self, doc, client=None, decision='approved', version=1):
         client = client or self.checker
         return client.call('/documents/' + doc + ('/review' if client is self.sol else '/checker-review'), {'version': version, 'decision': decision, 'notes': 'Data tidak sesuai' if decision == 'rejected' else ''})
+
+    def send(self, doc, client=None, channel=None):
+        return (client or self.checker).call('/documents/'+doc+'/send-confirmation', {'version':self.detail(doc)['version'],'channel':channel or self.choices[doc]})
+
+    def approve_and_send(self, doc):
+        self.assertEqual(self.review(doc)[0],200)
+        return self.send(doc)
 
     def tokens(self, doc):
         with app.database() as db:
@@ -65,11 +74,14 @@ class SolFirstFlowTests(unittest.TestCase):
                     self.assertEqual(db.execute('SELECT COUNT(*) FROM outbox WHERE doc_id=?', (doc,)).fetchone()[0], 0)
                 self.assertEqual(self.review(doc, self.sol)[0], 409)
                 self.assertEqual(self.maker.call('/documents/' + doc + '/resend', {'version': 1})[0], 409)
-                self.assertEqual(self.maker.call('/documents/' + doc + '/send-confirmation', {'version': 1, 'channel': 'email'})[0], 409)
+                self.assertEqual(self.maker.call('/documents/' + doc + '/send-confirmation', {'version': 1, 'channel': 'email'})[0], 403)
                 self.assertEqual(self.review(doc)[0], 200)
+                self.assertEqual(self.tokens(doc),[])
+                self.assertEqual(self.detail(doc)['delivery_channel'],'')
+                self.assertEqual(self.send(doc)[0],200)
                 tokens = self.tokens(doc)
                 self.assertEqual(len(tokens), 2 if dual else 1)
-                self.assertAlmostEqual(self.detail(doc)['file']['expires'] - time.time(), 600, delta=3)
+                self.assertAlmostEqual(self.detail(doc)['file']['expires'] - time.time(), 300, delta=3)
                 self.assertEqual(self.review(doc, self.sol)[0], 409)
                 for index, token in enumerate(tokens):
                     self.assertEqual(self.respond(token)[0], 200)
@@ -82,7 +94,7 @@ class SolFirstFlowTests(unittest.TestCase):
         for stage in ('SOL', 'nasabah', 'AMOL'):
             with self.subTest(stage=stage):
                 doc = self.create()
-                self.assertEqual(self.review(doc, decision='rejected' if stage == 'SOL' else 'approved')[0], 200)
+                self.assertEqual((self.review(doc, decision='rejected') if stage=='SOL' else self.approve_and_send(doc))[0], 200)
                 if stage == 'SOL':
                     self.assertEqual(self.tokens(doc), [])
                     self.assertFalse(app.deliver_one())
@@ -93,13 +105,16 @@ class SolFirstFlowTests(unittest.TestCase):
                 self.assertEqual(self.maker.call('/documents/' + doc + '/execution-pdf')[0], 409)
                 self.assertEqual(self.maker.call('/documents/' + doc + '/resend', {'version': 1})[0], 409)
 
-    def test_link_clock_starts_at_sol_approval_and_opening_does_not_extend_it(self):
+    def test_link_clock_starts_at_sol_delivery_and_opening_does_not_extend_it(self):
         doc = self.create()
         future = time.time() + 1800
         with patch.object(app.time, 'time', return_value=future):
             self.assertEqual(self.review(doc)[0], 200)
+        self.assertEqual(self.detail(doc)['file']['expires'],0)
+        with patch.object(app.time,'time',return_value=future+60):
+            self.assertEqual(self.send(doc)[0],200)
         expiry = self.detail(doc)['file']['expires']
-        self.assertEqual(expiry, future + 600)
+        self.assertEqual(expiry, future + 60 + 300)
         token = self.tokens(doc)[0]
         with patch.object(app.time, 'time', return_value=expiry - 1):
             self.assertEqual(Client(self.url).call('/portal', {'token': token})[0], 200)
@@ -113,7 +128,9 @@ class SolFirstFlowTests(unittest.TestCase):
             with self.subTest(dual=dual):
                 doc = self.create('whatsapp', dual=dual)
                 self.assertEqual(self.checker.call('/documents/' + doc + '/whatsapp-preview')[0], 409)
-                status, result, _ = self.review(doc)
+                self.assertEqual(self.review(doc)[0],200)
+                self.assertEqual(self.tokens(doc),[])
+                status, result, _ = self.send(doc)
                 self.assertEqual(status, 200, result)
                 previews = result['whatsapp'] if dual else [result['whatsapp']]
                 self.assertEqual(len(previews), 2 if dual else 1)
@@ -126,7 +143,7 @@ class SolFirstFlowTests(unittest.TestCase):
                 self.assertEqual(self.detail(doc)['delivery'], {'email_requested': False, 'whatsapp_prepared': True})
 
     def test_resend_keeps_sol_approval_and_only_reissues_unconfirmed_verifier(self):
-        doc = self.create(dual=True, real_pdf=True); self.review(doc)
+        doc = self.create('whatsapp',dual=True, real_pdf=True); self.approve_and_send(doc)
         first, second = self.tokens(doc)
         self.assertEqual(self.respond(first)[0], 200)
         self.assertEqual(self.maker.call('/documents/' + doc + '/resend', {'version': 1, 'channel': 'whatsapp'})[0], 429)
@@ -139,7 +156,7 @@ class SolFirstFlowTests(unittest.TestCase):
         self.assertEqual(detail['checker_status'], 'approved')
         self.assertEqual(detail['verification']['confirmed'], 1)
         self.assertEqual(Client(self.url).call('/portal', {'token': second})[0], 410)
-        self.assertAlmostEqual(detail['file']['expires'] - time.time(), 600, delta=3)
+        self.assertAlmostEqual(detail['file']['expires'] - time.time(), 300, delta=3)
         self.assertEqual(self.respond(self.tokens(doc)[0])[0], 200)
         self.assertEqual(self.review(doc, self.sol, version=2)[0], 200)
         self.assertEqual(self.maker.call('/documents/' + doc + '/execution-pdf')[0], 200)
@@ -149,12 +166,16 @@ class SolFirstFlowTests(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor() as pool:
             statuses = list(pool.map(lambda _: self.review(doc)[0], range(2)))
         self.assertEqual(sorted(statuses), [200, 409])
-        self.assertEqual(len(self.tokens(doc)), 1)
+        self.assertEqual(self.tokens(doc),[])
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            sends=list(pool.map(lambda _:self.send(doc)[0],range(2)))
+        self.assertEqual(sorted(sends),[200,409])
+        self.assertEqual(len(self.tokens(doc)),1)
 
-    def test_old_configuration_cannot_make_new_links_last_24_hours(self):
+    def test_old_hour_configuration_cannot_extend_the_five_minute_window(self):
         with patch.dict(app.os.environ, {'TOKEN_TTL_HOURS': '24'}):
-            doc = self.create(); self.review(doc)
-        self.assertAlmostEqual(self.detail(doc)['file']['expires'] - time.time(), 600, delta=3)
+            doc = self.create(); self.approve_and_send(doc)
+        self.assertAlmostEqual(self.detail(doc)['file']['expires'] - time.time(), 300, delta=3)
 
     def test_both_channel_is_rejected_and_teller_cannot_bypass_sol(self):
         payload = {**workflow.DESTINATION, 'cif': '1234567', 'kind': 'Standing Instruction', 'nominal': 1, 'file': workflow.FILE}
@@ -162,11 +183,41 @@ class SolFirstFlowTests(unittest.TestCase):
         doc = self.create()
         self.assertEqual(self.maker.call('/documents/' + doc + '/checker-review', {'version': 1, 'decision': 'approved'})[0], 403)
         self.assertEqual(self.checker.call('/documents/' + doc + '/checker-review', {'version': 2, 'decision': 'approved'})[0], 409)
-        self.assertEqual(self.review(doc)[0], 200)
-        self.assertEqual(self.maker.call('/documents/' + doc + '/whatsapp-preview')[0], 409)
+        self.assertEqual(self.approve_and_send(doc)[0],200)
+        self.assertEqual(self.maker.call('/documents/' + doc + '/whatsapp-preview')[0],403)
+
+    def test_only_sol_selects_initial_method_and_officer_resends_after_expiry(self):
+        payload = {**workflow.DESTINATION, 'cif': '1234567', 'kind': 'Standing Instruction', 'nominal': 1, 'file': workflow.FILE}
+        for channel in ('email','whatsapp','both'):
+            self.assertEqual(self.maker.call('/documents',{**payload,'channel':channel})[0],400)
+        doc=self.create('whatsapp')
+        self.assertEqual(self.send(doc)[0],409)
+        self.assertEqual(self.review(doc)[0],200)
+        self.assertEqual(self.tokens(doc),[])
+        self.assertEqual(self.detail(doc)['file']['expires'],0)
+        self.assertEqual(self.send(doc,client=self.maker)[0],403)
+        self.assertEqual(self.send(doc,client=self.sol)[0],403)
+        route='/documents/'+doc+'/send-confirmation'
+        self.assertEqual(self.checker.call(route,{'version':1,'channel':'email'},csrf=False)[0],403)
+        self.assertEqual(self.checker.call(route,{'version':2,'channel':'email'})[0],409)
+        self.assertEqual(self.checker.call(route,{'version':1,'channel':'both'})[0],400)
+        self.assertEqual(self.detail(doc)['delivery_channel'],'')
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1})[0],409)
+        self.assertEqual(self.send(doc)[0],200)
+        self.assertEqual(self.detail(doc)['delivery_channel'],'whatsapp')
+        self.assertEqual(self.send(doc,channel='email')[0],409)
+        self.assertEqual(self.maker.call('/documents/'+doc+'/whatsapp-preview')[0],403)
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1})[0],429)
+        with app.database(True) as db:db.execute('UPDATE versions SET expires=0 WHERE doc_id=?',(doc,))
+        self.assertEqual(self.checker.call('/documents/'+doc+'/resend',{'version':1})[0],403)
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1,'channel':'email'})[0],409)
+        self.assertEqual(self.detail(doc)['version'],1)
+        self.assertEqual(self.maker.call('/documents/'+doc+'/resend',{'version':1})[0],200)
+        self.assertEqual(self.detail(doc)['delivery_channel'],'whatsapp')
+        self.assertEqual(self.maker.call('/documents/'+doc+'/whatsapp-preview')[0],200)
 
     def test_pdf_and_audit_follow_sol_first_order(self):
-        doc = self.create(dual=True, real_pdf=True); self.review(doc)
+        doc = self.create(dual=True, real_pdf=True); self.approve_and_send(doc)
         for token in self.tokens(doc): self.assertEqual(self.respond(token)[0], 200)
         self.assertEqual(self.review(doc, self.sol)[0], 200)
         status, pdf, _ = self.maker.call('/documents/' + doc + '/execution-pdf')

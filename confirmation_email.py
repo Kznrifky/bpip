@@ -13,7 +13,7 @@ def expiry_label(expires):
     return f'{stamp.day} {MONTHS[stamp.month - 1]} {stamp.year} pukul {stamp:%H.%M} WIB'
 
 
-def confirmation_body(doc, link, expires, ttl_minutes=10):
+def confirmation_body(doc, link, expires, ttl_minutes=5):
     amount = f"Rp {doc['nominal']:,}".replace(',', '.')
     values = {key: ' '.join(str(doc[key] or 'Belum tercatat').splitlines()) for key in ('customer_name', 'id', 'kind', 'destination_account', 'destination_name')}
     bank_line = ('Bank Rekening Tujuan: ' + str(doc['destination_bank']) + '\n') if 'destination_bank' in doc.keys() and doc['destination_bank'] else ''

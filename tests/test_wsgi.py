@@ -48,6 +48,7 @@ class WSGITransportTests(unittest.TestCase):
         reviewer_csrf=json.loads(reviewer['body'])['csrf']
         reviewer_cookie=reviewer['headers']['Set-Cookie'].split(';')[0]
         self.assertEqual(self.request('/api/documents/'+doc_id+'/checker-review',{'version':1,'decision':'approved'},reviewer_cookie,reviewer_csrf)['status'],200)
+        self.assertEqual(self.request('/api/documents/'+doc_id+'/send-confirmation',{'version':1,'channel':'email'},reviewer_cookie,reviewer_csrf)['status'],200)
         with server.database() as db:
             token=db.execute('SELECT body FROM outbox WHERE doc_id=?',(doc_id,)).fetchone()['body'].split('/#confirm/')[1].split()[0]
         self.assertEqual(self.request('/api/portal',{'token':token})['status'],200)
